@@ -1,10 +1,9 @@
 // src/api/client.js
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-
+// 전체 URL을 직접 사용하도록 수정
 const client = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: 'http://localhost:8000/api', // 백엔드 서버 URL + API 경로
   headers: {
     'Content-Type': 'application/json',
   },

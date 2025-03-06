@@ -16,7 +16,7 @@ class KeywordAnalyzer:
     def __init__(self):
         self.api_key = settings.OPENAI_API_KEY
         self.client = OpenAI(api_key=self.api_key)
-        self.model = "gpt-4"  # 고급 모델 사용
+        self.model = "gpt-4o" 
     
     def analyze_keyword(self, keyword):
         """

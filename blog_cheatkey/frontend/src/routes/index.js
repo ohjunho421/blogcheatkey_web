@@ -6,11 +6,13 @@ import { useAuth } from '../context/AuthContext';
 // 레이아웃 컴포넌트
 import Layout from '../components/layout/Layout';
 
-// 페이지 컴포넌트 (아직 생성되지 않음)
+// 페이지 컴포넌트
 import Login from '../pages/Login';
 import Register from '../pages/Register';
 import Dashboard from '../pages/Dashboard';
 import NotFound from '../pages/NotFound';
+// 소셜 로그인 콜백 컴포넌트 추가
+import SocialLoginCallback from '../components/layout/SocialLoginCallback';
 
 // 인증이 필요한 라우트 래퍼
 const PrivateRoute = ({ children }) => {
@@ -30,6 +32,9 @@ const AppRouter = () => {
         {/* 공개 라우트 */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        
+        {/* 소셜 로그인 콜백 라우트 추가 */}
+        <Route path="/auth/callback" element={<SocialLoginCallback />} />
         
         {/* 인증이 필요한 라우트 */}
         <Route path="/" element={

@@ -85,7 +85,7 @@ ROOT_URLCONF = 'blog_cheatkey.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'templates')],
+        'DIRS': [os.path.join(BASE_DIR, 'frontend/build')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -163,9 +163,15 @@ REST_FRAMEWORK = {
 }
 
 # CORS 설정
-CORS_ALLOW_ALL_ORIGINS = DEBUG  # 개발 환경에서는 모든 출처 허용
 CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+
+# 개발 환경에서만 모든 출처 허용
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
 
 # 정적 파일 설정
 STATIC_URL = '/static/'
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'frontend/build/static'),  # React 빌드 정적 파일 경로
+]
