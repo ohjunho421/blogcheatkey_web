@@ -13,6 +13,7 @@ urlpatterns = [
         path("key-word/", include("key_word.urls")),  # 키워드 관련 API
         path("content/", include("content.urls")),  # 콘텐츠 관련 API
         path("history/", include("history.urls")),  # 히스토리 관련 API
+        path("title/", include("title.urls")),
     ])),
     
     # React 앱의 모든 경로를 처리하는 catch-all 뷰 (관리자 페이지를 제외한 모든 경로)

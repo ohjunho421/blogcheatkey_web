@@ -1,15 +1,14 @@
 # title/urls.py
-from django.urls import path
-from .views import (
-    TitleGenerateView,
-    TitleSelectView,
-    SummaryCreateView
-)
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import TitleSuggestionViewSet
 
 app_name = 'title'
 
+# ViewSet을 사용하므로 라우터를 설정합니다
+router = DefaultRouter()
+router.register('', TitleSuggestionViewSet, basename='title')
+
 urlpatterns = [
-    path('<int:content_pk>/generate/', TitleGenerateView.as_view(), name='generate'),
-    path('<int:pk>/select/', TitleSelectView.as_view(), name='select'),
-    path('<int:content_pk>/summary/<str:summary_type>/', SummaryCreateView.as_view(), name='summary'),
+    path('', include(router.urls)),
 ]

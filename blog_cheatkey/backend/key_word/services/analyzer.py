@@ -14,9 +14,20 @@ class KeywordAnalyzer:
     """
     
     def __init__(self):
-        self.api_key = settings.OPENAI_API_KEY
+        import os
+        os.environ.pop('http_proxy', None)
+        os.environ.pop('https_proxy', None)
+        
+        from dotenv import load_dotenv
+        import pathlib
+        
+        backend_dir = pathlib.Path(__file__).parent.parent.parent
+        env_path = os.path.join(backend_dir, '.env')
+        load_dotenv(dotenv_path=env_path)
+        
+        self.api_key = os.environ.get('OPENAI_API_KEY')
         self.client = OpenAI(api_key=self.api_key)
-        self.model = "gpt-4o" 
+        self.model = "gpt-4o"
     
     def analyze_keyword(self, keyword):
         """

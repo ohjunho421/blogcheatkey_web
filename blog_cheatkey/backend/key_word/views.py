@@ -1,3 +1,4 @@
+#key_word/views.py
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -26,25 +27,55 @@ class KeywordViewSet(viewsets.ModelViewSet):
         
         try:
             # 키워드 분석 서비스 초기화
-            analyzer = KeywordAnalyzer()
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"키워드 분석 시작: {keyword.keyword}")
+            
+            try:
+                analyzer = KeywordAnalyzer()
+                logger.info("KeywordAnalyzer 초기화 성공")
+            except Exception as init_error:
+                logger.error(f"KeywordAnalyzer 초기화 실패: {str(init_error)}")
+                return Response({"error": f"분석기 초기화 실패: {str(init_error)}"}, 
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # 분석 수행
-            analysis_result = analyzer.analyze_keyword(keyword.keyword)
+            try:
+                analysis_result = analyzer.analyze_keyword(keyword.keyword)
+                logger.info(f"키워드 분석 완료: {analysis_result}")
+            except Exception as analysis_error:
+                logger.error(f"키워드 분석 실패: {str(analysis_error)}")
+                return Response({"error": f"키워드 분석 실패: {str(analysis_error)}"}, 
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # 분석 결과 저장
-            keyword.main_intent = analysis_result.get('main_intent', '')
-            keyword.info_needed = analysis_result.get('info_needed', [])
-            keyword.pain_points = analysis_result.get('pain_points', [])
-            keyword.save()
+            try:
+                keyword.main_intent = analysis_result.get('main_intent', '')
+                keyword.info_needed = analysis_result.get('info_needed', [])
+                keyword.pain_points = analysis_result.get('pain_points', [])
+                keyword.save()
+                logger.info("키워드 분석 결과 저장 완료")
+            except Exception as save_error:
+                logger.error(f"키워드 분석 결과 저장 실패: {str(save_error)}")
+                return Response({"error": f"분석 결과 저장 실패: {str(save_error)}"}, 
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             # 소제목 추천
-            subtopics = analyzer.suggest_subtopics(keyword.keyword)
-            for i, subtopic in enumerate(subtopics):
-                Subtopic.objects.create(
-                    keyword=keyword,
-                    title=subtopic,
-                    order=i
-                )
+            try:
+                subtopics = analyzer.suggest_subtopics(keyword.keyword)
+                logger.info(f"소제목 추천 완료: {subtopics}")
+                
+                for i, subtopic in enumerate(subtopics):
+                    Subtopic.objects.create(
+                        keyword=keyword,
+                        title=subtopic,
+                        order=i
+                    )
+                logger.info("소제목 데이터베이스 저장 완료")
+            except Exception as subtopic_error:
+                logger.error(f"소제목 추천 또는 저장 실패: {str(subtopic_error)}")
+                return Response({"error": f"소제목 처리 실패: {str(subtopic_error)}"}, 
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             return Response({
                 "message": "키워드 분석이 완료되었습니다.",
@@ -52,6 +83,8 @@ class KeywordViewSet(viewsets.ModelViewSet):
             })
             
         except Exception as e:
+            import traceback
+            logger.error(f"키워드 분석 중 예외 발생: {str(e)}\n{traceback.format_exc()}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SubtopicViewSet(viewsets.ModelViewSet):

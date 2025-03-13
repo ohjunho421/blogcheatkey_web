@@ -312,7 +312,29 @@ class ContentGenerator:
         """
         
         return prompt
-    
+    def _needs_optimization(self, content, keyword):
+        """
+        콘텐츠가 최적화가 필요한지 판단
+        
+        Args:
+            content (str): 분석할 콘텐츠
+            keyword (str): 키워드
+            
+        Returns:
+            bool: 최적화 필요 여부
+        """
+        # 형태소 분석 결과 가져오기
+        analysis = self.analyze_morphemes(content, keyword)
+        
+        # 형태소 분석 결과에 이미 needs_optimization 필드가 있으면 그 값 사용
+        if 'needs_optimization' in analysis:
+            return analysis['needs_optimization']
+        
+        # 아니면 분석 결과를 기반으로 판단
+        # 하나라도 유효하지 않은 형태소가 있으면 최적화 필요
+        return not analysis.get('is_valid', True)
+
+
     def _create_optimization_prompt(self, content, data):
         """
         콘텐츠 최적화 프롬프트 생성
@@ -366,6 +388,68 @@ class ContentGenerator:
         자연스럽게 수정해주세요. 전문성은 유지하되 읽기 쉽게 수정해주세요.
         """
     
+    def analyze_morphemes(self, text, keyword=None, custom_morphemes=None):
+        """형태소 분석 및 출현 횟수 검증"""
+        if not keyword:
+            return {}
+
+        # 정확한 카운팅을 위한 전처리
+        text = re.sub(r'<[^>]+>', '', text)  # HTML 태그 제거
+        text = re.sub(r'[^\w\s가-힣]', ' ', text)  # 특수문자 처리 (한글 포함)
+        
+        # 키워드와 형태소 출현 횟수 계산
+        keyword_count = self._count_exact_word(keyword, text)
+        morphemes = self.okt.morphs(keyword)
+        
+        # 사용자 지정 형태소 추가
+        if custom_morphemes:
+            morphemes.extend(custom_morphemes)
+        morphemes = list(set(morphemes))  # 중복 제거
+
+        analysis = {
+            "is_valid": True,
+            "morpheme_analysis": {},
+            "needs_optimization": False
+        }
+
+        # 키워드 분석
+        analysis["morpheme_analysis"][keyword] = {
+            "count": keyword_count,
+            "is_valid": 17 <= keyword_count <= 20,
+            "status": "적정" if 17 <= keyword_count <= 20 else "과다" if keyword_count > 20 else "부족"
+        }
+
+        # 형태소 분석
+        for morpheme in morphemes:
+            count = self._count_exact_word(morpheme, text)
+            is_valid = 17 <= count <= 20
+            
+            if not is_valid:
+                analysis["is_valid"] = False
+                analysis["needs_optimization"] = True
+
+            analysis["morpheme_analysis"][morpheme] = {
+                "count": count,
+                "is_valid": is_valid,
+                "status": "적정" if is_valid else "과다" if count > 20 else "부족"
+            }
+
+        return analysis
+
+    def _count_exact_word(self, word, text):
+        """
+        텍스트에서 특정 단어의 정확한 출현 횟수를 계산합니다.
+        
+        Args:
+            word (str): 찾을 단어
+            text (str): 검색할 텍스트
+            
+        Returns:
+            int: 단어의 출현 횟수
+        """
+        pattern = rf'\b{word}\b|\b{word}(?=[\s.,!?])|(?<=[\s.,!?]){word}\b'
+        return len(re.findall(pattern, text))
+
     def _format_for_mobile(self, content):
         """
         모바일 화면에 최적화된 포맷으로 변환

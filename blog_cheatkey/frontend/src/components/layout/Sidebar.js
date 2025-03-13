@@ -4,7 +4,7 @@ import { NavLink } from 'react-router-dom';
 
 const Sidebar = () => {
   const menuItems = [
-    { path: '/', name: '사이드바' },
+    { path: '/', name: '메인으로' },
     { path: '/keywords', name: '키워드 관리' },
     { path: '/contents', name: '콘텐츠 관리' },
     { path: '/titles', name: '제목 생성기' },

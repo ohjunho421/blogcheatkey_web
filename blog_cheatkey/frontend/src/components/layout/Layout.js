@@ -6,12 +6,12 @@ import Sidebar from './Sidebar';
 
 const Layout = () => {
   return (
-    <div className="min-h-screen bg-gray-100">
-      <Navbar />
-      <div className="flex">
-        <Sidebar />
-        <main className="flex-1 p-4">
-          <Outlet />
+    <div className="flex min-h-screen bg-gray-100">
+      <Sidebar />
+      <div className="flex-1">
+        <Navbar />
+        <main className="p-4">
+          <Outlet /> {/* 중첩 라우트가 렌더링되는 위치 */}
         </main>
       </div>
     </div>
