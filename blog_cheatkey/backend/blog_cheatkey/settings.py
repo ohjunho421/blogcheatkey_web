@@ -175,3 +175,19 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'frontend/build/static'),  # React 빌드 정적 파일 경로
 ]
+
+# CSRF 설정
+CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
+
+# CSRF 쿠키 설정
+CSRF_COOKIE_SAMESITE = 'Lax'  # 또는 'None' (하지만 'None'인 경우 SECURE_COOKIE가 True여야 함)
+CSRF_COOKIE_HTTPONLY = False  # JavaScript에서 접근 가능하도록 설정
+CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False') == 'True'  # HTTPS 사용 시 True로 설정
+
+# 미디어 파일 설정
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+if DEBUG:
+    print(f"MEDIA_ROOT 경로: {MEDIA_ROOT}")
+    print(f"MEDIA_URL: {MEDIA_URL}")

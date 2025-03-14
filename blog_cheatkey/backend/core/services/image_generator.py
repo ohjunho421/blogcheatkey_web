@@ -319,9 +319,37 @@ class ImageGenerator:
         """
         try:
             # 이미지 다운로드
+            logger.info(f"이미지 다운로드 시도: {image_url}")
             response = requests.get(image_url, timeout=10)
+            
             if response.status_code != 200:
-                logger.error(f"이미지 다운로드 실패: {response.status_code}")
+                logger.error(f"이미지 다운로드 실패: 상태 코드 {response.status_code}")
+                return None
+            
+            # 다운로드한 데이터의 크기 확인
+            content_length = len(response.content)
+            logger.info(f"다운로드한 데이터 크기: {content_length} 바이트")
+            
+            if content_length < 1000:  # 파일이 너무 작으면 의심
+                logger.warning(f"다운로드한 파일이 너무 작습니다: {content_length} 바이트")
+            
+            # 이미지 유효성 검사
+            try:
+                img = Image.open(BytesIO(response.content))
+                img_format = img.format
+                img_size = img.size
+                logger.info(f"이미지 확인: 형식={img_format}, 크기={img_size}")
+                
+                # 이미지 저장 전 확인
+                img.verify()  # 유효한 이미지인지 확인
+            except Exception as e:
+                logger.error(f"유효하지 않은 이미지: {str(e)}")
+                # 다운로드한 내용이 무엇인지 확인 (텍스트인 경우)
+                if content_length < 1000:
+                    try:
+                        logger.error(f"다운로드한 내용(일부): {response.content[:200]}")
+                    except:
+                        pass
                 return None
             
             # 이미지 파일 생성
@@ -338,13 +366,19 @@ class ImageGenerator:
                 blog_content=blog_content,
                 subtopic=subtopic,
                 prompt=prompt,
-                alt_text=alt_text[:200]  # 최대 200자로 제한
+                alt_text=alt_text[:200] if alt_text else "",  # 최대 200자로 제한
+                is_infographic=is_infographic
             )
             image.image.save(file_name, image_content, save=False)
             image.save()
+            
+            # 저장 성공 로깅
+            logger.info(f"이미지 저장 성공: ID={image.id}, 경로={image.image.path}, URL={image.image.url}")
             
             return image
             
         except Exception as e:
             logger.error(f"이미지 저장 중 오류: {str(e)}")
+            import traceback
+            logger.error(f"상세 오류 정보: {traceback.format_exc()}")
             return None
