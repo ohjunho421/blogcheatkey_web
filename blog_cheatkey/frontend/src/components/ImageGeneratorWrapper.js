@@ -20,6 +20,8 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
   const [success, setSuccess] = useState(null);
   const [generationType, setGenerationType] = useState('all');
   const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [timeoutMessage, setTimeoutMessage] = useState(null);
+  const [imageLoadStatus, setImageLoadStatus] = useState({});
 
   // 콘텐츠에서 소제목 추출
   useEffect(() => {
@@ -84,11 +86,18 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
+    setTimeoutMessage(null);
     setGenerationType('all');
+
+    // 타임아웃 알림 설정 (60초 후)
+    const timeoutAlert = setTimeout(() => {
+      setTimeoutMessage('이미지 생성이 오래 걸리고 있습니다. 계속 기다려주세요...');
+    }, 60000);
 
     try {
       const response = await imageGeneratorService.generateImagesForContent(contentId);
       
+      clearTimeout(timeoutAlert);
       console.log('이미지 생성 응답:', response.data);
       
       if (response && response.data) {
@@ -98,7 +107,12 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
         setError('이미지 생성 결과가 올바른 형식이 아닙니다.');
       }
     } catch (error) {
-      setError('이미지 생성 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      clearTimeout(timeoutAlert);
+      if (error.message && error.message.includes('timeout')) {
+        setError('이미지 생성 시간이 초과되었습니다. 서버에서는 계속 처리 중일 수 있으니 잠시 후 "이미지 새로고침" 버튼을 눌러보세요.');
+      } else {
+        setError('이미지 생성 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      }
       console.error('이미지 생성 실패:', error);
     } finally {
       setLoading(false);
@@ -112,11 +126,18 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
+    setTimeoutMessage(null);
     setGenerationType('single');
+
+    // 타임아웃 알림 설정 (60초 후)
+    const timeoutAlert = setTimeout(() => {
+      setTimeoutMessage('이미지 생성이 오래 걸리고 있습니다. 계속 기다려주세요...');
+    }, 60000);
 
     try {
       const response = await imageGeneratorService.generateImagesForContent(contentId, selectedSubtopic);
       
+      clearTimeout(timeoutAlert);
       console.log('단일 이미지 생성 응답:', response.data);
       
       if (response && response.data) {
@@ -124,7 +145,12 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
         setSuccess('선택한 소제목에 대한 이미지가 성공적으로 생성되었습니다.');
       }
     } catch (error) {
-      setError('이미지 생성 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      clearTimeout(timeoutAlert);
+      if (error.message && error.message.includes('timeout')) {
+        setError('이미지 생성 시간이 초과되었습니다. 서버에서는 계속 처리 중일 수 있으니 잠시 후 "이미지 새로고침" 버튼을 눌러보세요.');
+      } else {
+        setError('이미지 생성 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      }
       console.error('이미지 생성 실패:', error);
     } finally {
       setLoading(false);
@@ -138,11 +164,18 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
     setLoading(true);
     setError(null);
     setSuccess(null);
+    setTimeoutMessage(null);
     setGenerationType('infographic');
+
+    // 타임아웃 알림 설정 (60초 후)
+    const timeoutAlert = setTimeout(() => {
+      setTimeoutMessage('인포그래픽 생성이 오래 걸리고 있습니다. 계속 기다려주세요...');
+    }, 60000);
 
     try {
       const response = await imageGeneratorService.generateInfographic(contentId, selectedSubtopic);
       
+      clearTimeout(timeoutAlert);
       console.log('인포그래픽 생성 응답:', response.data);
       
       if (response && response.data) {
@@ -150,7 +183,12 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
         setSuccess('인포그래픽이 성공적으로 생성되었습니다.');
       }
     } catch (error) {
-      setError('인포그래픽 생성 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      clearTimeout(timeoutAlert);
+      if (error.message && error.message.includes('timeout')) {
+        setError('인포그래픽 생성 시간이 초과되었습니다. 서버에서는 계속 처리 중일 수 있으니 잠시 후 "이미지 새로고침" 버튼을 눌러보세요.');
+      } else {
+        setError('인포그래픽 생성 중 오류가 발생했습니다: ' + (error.message || '알 수 없는 오류'));
+      }
       console.error('인포그래픽 생성 실패:', error);
     } finally {
       setLoading(false);
@@ -165,6 +203,46 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
     } else {
       setError('이미지 데이터가 없거나 배열이 아닙니다.');
     }
+  };
+
+  // 이미지 로드 성공 핸들러
+  const handleImageLoad = (imageId) => {
+    setImageLoadStatus(prev => ({
+      ...prev,
+      [imageId]: 'loaded'
+    }));
+    console.log(`이미지 로드 성공: ${imageId}`);
+  };
+
+  // 이미지 다운로드 함수
+  const handleDownloadImage = (imageUrl, fileName) => {
+    // URL이 상대 경로인 경우 절대 경로로 변환
+    const fullUrl = imageUrl.startsWith('/') 
+      ? `${window.location.origin}${imageUrl}` 
+      : imageUrl;
+    
+    // fetch를 사용하여 이미지를 가져온 후 blob으로 다운로드
+    fetch(fullUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP 오류: ${response.status}`);
+        }
+        return response.blob();
+      })
+      .then(blob => {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName || '이미지.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl); // 메모리 누수 방지
+      })
+      .catch(err => {
+        console.error('이미지 다운로드 실패:', err);
+        alert('이미지 다운로드에 실패했습니다. 다시 시도해 주세요.');
+      });
   };
 
   return (
@@ -289,6 +367,17 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
         </div>
       )}
       
+      {timeoutMessage && (
+        <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4">
+          {timeoutMessage}
+          <div className="mt-2">
+            <span className="inline-block bg-yellow-500 text-white text-xs px-2 py-1 rounded animate-pulse">
+              이미지 생성에는 1-3분이 소요될 수 있습니다
+            </span>
+          </div>
+        </div>
+      )}
+      
       {success && (
         <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-4">
           {success}
@@ -314,19 +403,20 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
       )}
       
       {/* 생성된 이미지 미리보기 */}
-        {Array.isArray(images) && images.length > 0 ? (
+      {Array.isArray(images) && images.length > 0 ? (
         <div className="mt-6">
-            <h4 className="text-md font-medium mb-3">생성된 이미지 ({images.length}개)</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <h4 className="text-md font-medium mb-3">생성된 이미지 ({images.length}개)</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {images.map((image, index) => (
-                <div key={`${image.id || index}-${image.image || image.url}`} className="border rounded-lg overflow-hidden">
-                {/* 이미지에 onError 핸들러 수정 */}
+              <div key={`${image.id || index}-${image.image || image.url}`} className="border rounded-lg overflow-hidden">
+                {/* 이미지에 onError 핸들러 수정 및 onLoad 핸들러 추가 */}
                 <img 
-                    src={image.url || image.image} 
-                    alt={image.alt_text || image.subtopic || '생성된 이미지'}
-                    className="w-full h-auto object-cover"
-                    loading="lazy"
-                    onError={(e) => {
+                  src={image.url || image.image} 
+                  alt={image.alt_text || image.subtopic || '생성된 이미지'}
+                  className="w-full h-auto object-cover"
+                  loading="lazy"
+                  onLoad={() => handleImageLoad(image.id)}
+                  onError={(e) => {
                     // 이미 대체 이미지로 변경된 경우 더 이상 시도하지 않음
                     if (e.target.src.includes('data:image')) return;
                     
@@ -336,17 +426,38 @@ const ImageGeneratorWrapper = ({ contentId, content }) => {
                     // 이미지 스타일 추가
                     e.target.style.backgroundColor = '#f0f0f0';
                     e.target.style.border = '1px solid #ddd';
-                    }}
+                    
+                    // 이미지 로드 상태 업데이트
+                    setImageLoadStatus(prev => ({
+                      ...prev,
+                      [image.id]: 'error'
+                    }));
+                  }}
                 />
                 <div className="p-3 bg-gray-50">
-                  <p className="font-medium text-sm">{image.subtopic || '소제목 정보 없음'}</p>
+                  <div className="flex justify-between items-center">
+                    <p className="font-medium text-sm">{image.subtopic || '소제목 정보 없음'}</p>
+                    <button
+                      onClick={() => handleDownloadImage(image.url || image.image, `${image.subtopic || '이미지'}.png`)}
+                      className="text-xs bg-blue-500 hover:bg-blue-600 text-white py-1 px-2 rounded"
+                    >
+                      다운로드
+                    </button>
+                  </div>
+                  
                   {image.image && (
                     <p className="text-xs text-gray-500 mt-1 truncate">이미지 경로: {image.image}</p>
                   )}
+                  
                   {image.is_infographic && (
                     <span className="inline-block bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded mt-1">
                       인포그래픽
                     </span>
+                  )}
+                  
+                  {/* 이미지 로드 상태 표시 */}
+                  {imageLoadStatus[image.id] === 'error' && (
+                    <p className="text-xs text-red-500 mt-1">이미지 로드 실패</p>
                   )}
                 </div>
               </div>

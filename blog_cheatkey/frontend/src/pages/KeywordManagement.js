@@ -8,6 +8,7 @@ const KeywordManagement = () => {
   const [error, setError] = useState(null);
   const [newKeyword, setNewKeyword] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
+  const [editingSubtopic, setEditingSubtopic] = useState({ keywordId: null, index: null, value: '' });
 
   // 키워드 목록 로드
   useEffect(() => {
@@ -46,14 +47,15 @@ const KeywordManagement = () => {
     }
   };
 
-  // 새 키워드 추가
+  // 새 키워드 추가 - 맨 위에 추가되도록 수정
   const handleAddKeyword = async (e) => {
     e.preventDefault();
     if (!newKeyword.trim()) return;
 
     try {
       const response = await keywordService.createKeyword({ keyword: newKeyword });
-      setKeywords([...keywords, response.data]);
+      // 새 키워드를 배열의 맨 앞에 추가 (변경된 부분)
+      setKeywords([response.data, ...keywords]);
       setNewKeyword('');
     } catch (err) {
       setError('키워드 추가 중 오류가 발생했습니다.');
@@ -75,51 +77,54 @@ const KeywordManagement = () => {
     }
   };
 
-  // 키워드 분석
+  // 키워드 분석 - 자동 새로고침 기능 추가
   const analyzeKeyword = async (id) => {
     setAnalyzing(true);
     setError(null); // 기존 오류 메시지 초기화
     
     try {
+      // 분석 요청 전송
       const response = await keywordService.analyzeKeyword(id);
-      console.log('키워드 분석 응답:', response.data);
+      console.log('키워드 분석 요청 성공:', response.data);
       
-      // 분석 데이터 확인
-      if (!response.data || Object.keys(response.data).length === 0) {
-        throw new Error('분석 데이터가 비어있습니다');
-      }
+      // 분석 상태 확인 함수
+      const checkAnalysisStatus = async () => {
+        try {
+          // 키워드 상세 정보 가져오기
+          const keywordDetail = await keywordService.getKeyword(id);
+          console.log('키워드 상태 확인:', keywordDetail.data);
+          
+          // 분석 결과가 있는지 확인
+          if (keywordDetail.data.main_intent) {
+            // 분석이 완료된 경우 키워드 목록 새로고침
+            const updatedKeywords = await keywordService.getKeywords();
+            if (Array.isArray(updatedKeywords.data)) {
+              setKeywords(updatedKeywords.data);
+            } else if (updatedKeywords.data.results && Array.isArray(updatedKeywords.data.results)) {
+              setKeywords(updatedKeywords.data.results);
+            }
+            
+            setAnalyzing(false);
+            // 분석 완료 메시지 설정 (3초 후 자동 사라짐)
+            setError(null);
+            return;
+          }
+          
+          // 아직 분석 중인 경우 2초 후 다시 확인
+          setTimeout(checkAnalysisStatus, 2000);
+        } catch (err) {
+          console.error('키워드 상태 확인 오류:', err);
+          setError('키워드 상태 확인 중 오류가 발생했습니다.');
+          setAnalyzing(false);
+        }
+      };
       
-      // 서버에 분석 결과 저장 (PUT 요청)
-      const updateResponse = await keywordService.updateKeyword(id, {
-        ...response.data,
-        analysis_complete: true // 분석 완료 플래그 추가
-      });
-      
-      console.log('키워드 업데이트 응답:', updateResponse.data);
-      
-      // 상태 업데이트 전에 확인
-      console.log('업데이트할 키워드 ID:', id);
-      
-      // 로컬 상태 업데이트
-      setKeywords(prevKeywords => 
-        prevKeywords.map(keyword => 
-          keyword.id === id ? { ...keyword, ...response.data, analysis_complete: true } : keyword
-        )
-      );
-      
-      // 성공 알림 (선택적)
-      // alert('키워드 분석이 완료되었습니다');
+      // 분석 상태 확인 시작
+      setTimeout(checkAnalysisStatus, 2000);
       
     } catch (err) {
       console.error('키워드 분석 오류:', err);
       setError('키워드 분석 중 오류가 발생했습니다.');
-      
-      // 3초 후 오류 메시지 자동 제거 (선택적)
-      setTimeout(() => {
-        setError(null);
-      }, 3000);
-      
-    } finally {
       setAnalyzing(false);
     }
   };
@@ -138,6 +143,48 @@ const KeywordManagement = () => {
       setKeywords(updatedKeywords);
     } catch (err) {
       setError('소제목 추천 중 오류가 발생했습니다.');
+      console.error(err);
+    }
+  };
+
+  // 소제목 편집 시작
+  const handleEditSubtopic = (keywordId, index, value) => {
+    setEditingSubtopic({ keywordId, index, value });
+  };
+
+  // 소제목 편집 취소
+  const handleCancelEdit = () => {
+    setEditingSubtopic({ keywordId: null, index: null, value: '' });
+  };
+
+  // 소제목 편집 저장
+  const handleSaveSubtopic = async (keywordId) => {
+    try {
+      // 편집할 키워드 찾기
+      const keyword = keywords.find(k => k.id === keywordId);
+      if (!keyword || !keyword.subtopics) return;
+      
+      // 소제목 목록 복사 및 변경
+      const updatedSubtopics = [...keyword.subtopics];
+      updatedSubtopics[editingSubtopic.index] = editingSubtopic.value;
+      
+      // API 호출 (소제목 업데이트)
+      await keywordService.updateKeyword(keywordId, {
+        subtopics: updatedSubtopics
+      });
+      
+      // 로컬 상태 업데이트
+      const updatedKeywords = keywords.map(k => {
+        if (k.id === keywordId) {
+          return { ...k, subtopics: updatedSubtopics };
+        }
+        return k;
+      });
+      
+      setKeywords(updatedKeywords);
+      setEditingSubtopic({ keywordId: null, index: null, value: '' });
+    } catch (err) {
+      setError('소제목 업데이트 중 오류가 발생했습니다.');
       console.error(err);
     }
   };
@@ -193,10 +240,47 @@ const KeywordManagement = () => {
                   <p className="font-medium">추천 소제목:</p>
                   <ul className="list-disc pl-5">
                     {keyword.subtopics.map((subtopic, index) => (
-                      <li key={index} className="text-gray-700">
-                        {typeof subtopic === 'string' 
-                          ? subtopic 
-                          : (subtopic.title || `소제목 ${index + 1}`)}
+                      <li key={index} className="text-gray-700 mt-2">
+                        {editingSubtopic.keywordId === keyword.id && editingSubtopic.index === index ? (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editingSubtopic.value}
+                              onChange={(e) => setEditingSubtopic({...editingSubtopic, value: e.target.value})}
+                              className="border rounded p-1 w-full"
+                            />
+                            <button 
+                              onClick={() => handleSaveSubtopic(keyword.id)}
+                              className="bg-green-500 text-white px-2 py-1 rounded text-xs"
+                            >
+                              저장
+                            </button>
+                            <button 
+                              onClick={handleCancelEdit}
+                              className="bg-gray-500 text-white px-2 py-1 rounded text-xs"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {typeof subtopic === 'string' 
+                                ? subtopic 
+                                : (subtopic.title || `소제목 ${index + 1}`)}
+                            </span>
+                            <button 
+                              onClick={() => handleEditSubtopic(
+                                keyword.id, 
+                                index, 
+                                typeof subtopic === 'string' ? subtopic : (subtopic.title || `소제목 ${index + 1}`)
+                              )}
+                              className="bg-blue-500 text-white px-2 py-1 rounded text-xs ml-2"
+                            >
+                              수정
+                            </button>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
