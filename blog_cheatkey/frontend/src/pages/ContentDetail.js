@@ -44,7 +44,7 @@ function ContentDetail() {
   // 콘텐츠에서 참고자료 섹션을 찾아 링크를 활성화하는 함수
   const processContentWithActiveReferences = (htmlContent) => {
     if (!htmlContent) return '';
-
+  
     // 참고자료 섹션을 찾기 위한 정규식
     const referenceRegex = /(## 참고자료[\s\S]*)/;
     const match = htmlContent.match(referenceRegex);
@@ -54,10 +54,16 @@ function ContentDetail() {
     const beforeReferences = htmlContent.substring(0, match.index);
     let referencesSection = match[0];
     
-    // 마크다운 링크 형식([텍스트](URL))을 HTML 링크로 변환
+    // 1. 마크다운 링크 형식([텍스트](URL))을 HTML 링크로 변환
     referencesSection = referencesSection.replace(
       /\[(.*?)\]\((https?:\/\/[^\s)]+)\)/g, 
       '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">$1</a>'
+    );
+    
+    // 2. 일반 텍스트 형식의 도메인 이름 (xxx.com)을 링크로 변환
+    referencesSection = referencesSection.replace(
+      /([A-Za-z0-9-]+\.(com|org|net|edu|io|co))\b/g,
+      '<a href="https://$1" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">$1</a>'
     );
     
     return beforeReferences + referencesSection;

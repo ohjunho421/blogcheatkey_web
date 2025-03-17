@@ -62,44 +62,24 @@ client.interceptors.request.use(
   }
 );
 
-// 응답 인터셉터 - 에러 처리 및 로깅
+// src/api/client.js 파일에 인터셉터 추가
 client.interceptors.response.use(
-  (response) => {
-    // 개발 환경에서만 성공 응답 로깅 (선택 사항)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('API 응답 성공:', {
-        url: response.config.url,
-        status: response.status,
-        statusText: response.statusText
-      });
-    }
-    return response;
-  },
-  (error) => {
-    // 상세 에러 로깅
-    if (error.response) {
-      // 서버가 응답을 반환한 경우
-      console.error('API 오류 응답:', {
-        url: error.config.url,
-        status: error.response.status,
-        statusText: error.response.statusText,
-        data: error.response.data
-      });
-    } else if (error.request) {
-      // 요청은 보냈지만 응답을 받지 못한 경우
-      console.error('API 요청 후 응답 없음:', error.request);
-    } else {
-      // 요청 설정 중 오류가 발생한 경우
-      console.error('API 요청 설정 중 오류:', error.message);
-    }
-
-    // 401 에러 (인증 실패) 처리 - 자동 로그아웃
-    if (error.response && error.response.status === 401) {
-      // 이미 로그인 페이지가 아닌 경우에만 리디렉션
-      if (!window.location.pathname.includes('/login')) {
-        localStorage.removeItem('token');
-        window.location.href = '/login';
-      }
+  response => response,
+  error => {
+    // 네트워크 오류 또는 타임아웃 확인
+    if (!error.response || error.code === 'ECONNABORTED') {
+      console.log('네트워크 오류가 발생했습니다. 페이지를 새로고침합니다.');
+      
+      // 사용자에게 알림 표시 (선택 사항)
+      const notification = document.createElement('div');
+      notification.textContent = '연결이 끊겼습니다. 3초 후 페이지가 새로고침됩니다...';
+      notification.style = 'position:fixed; top:0; left:0; right:0; background:red; color:white; padding:10px; text-align:center; z-index:9999;';
+      document.body.appendChild(notification);
+      
+      // 3초 후 새로고침
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
     }
     
     return Promise.reject(error);

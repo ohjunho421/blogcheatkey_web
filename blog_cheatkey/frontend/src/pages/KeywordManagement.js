@@ -53,7 +53,7 @@ const KeywordManagement = () => {
     if (!newKeyword.trim()) return;
 
     try {
-      const response = await keywordService.createKeyword({ keyword: newKeyword });
+      const response = await keywordService.addKeyword({ keyword: newKeyword });
       // 새 키워드를 배열의 맨 앞에 추가 (변경된 부분)
       setKeywords([response.data, ...keywords]);
       setNewKeyword('');
@@ -170,6 +170,8 @@ const KeywordManagement = () => {
       
       // API 호출 (소제목 업데이트)
       await keywordService.updateKeyword(keywordId, {
+        keyword: keyword.keyword,  // 다른 필수 필드들 포함
+        main_intent: keyword.main_intent,
         subtopics: updatedSubtopics
       });
       

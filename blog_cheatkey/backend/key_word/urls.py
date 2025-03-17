@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import KeywordViewSet, SubtopicViewSet
 
 router = DefaultRouter()
-router.register(r'keywords', KeywordViewSet, basename='keyword')
+router.register(r'', KeywordViewSet, basename='keyword')  # 빈 문자열로 변경
 router.register(r'subtopics', SubtopicViewSet, basename='subtopic')
 
 urlpatterns = [

@@ -48,49 +48,55 @@ const requestWithRetry = async (requestFn, retryConfig = {}) => {
 export const keywordService = {
   // 키워드 목록 조회
   getKeywords: () => requestWithRetry(
-    (config) => client.get('/key_word/', config),
+    (config) => client.get('/key-word/', config),  // key_word/ -> key-word/
     { maxRetries: 3, retryDelay: 1000, timeout: 30000 }
   ),
   
   // 분석된 키워드 목록만 조회
   getAnalyzedKeywords: () => requestWithRetry(
-    (config) => client.get('/key_word/?analyzed=true', config),
+    (config) => client.get('/key-word/?analyzed=true', config),  // key_word/ -> key-word/
     { maxRetries: 3, retryDelay: 1000, timeout: 30000 }
   ),
   
   // 특정 키워드 조회
   getKeyword: (id) => requestWithRetry(
-    (config) => client.get(`/key_word/${id}/`, config),
+    (config) => client.get(`/key-word/${id}/`, config),  // key_word/ -> key-word/
     { maxRetries: 2, retryDelay: 1000, timeout: 20000 }
   ),
   
   // 키워드 추가
   addKeyword: (data) => requestWithRetry(
-    (config) => client.post('/key_word/', data, config),
+    (config) => client.post('/key-word/', data, config),  // key_word/ -> key-word/
+    { maxRetries: 2, retryDelay: 2000, timeout: 30000 }
+  ),
+  
+  // createKeyword를 addKeyword의 별칭으로 추가
+  createKeyword: (data) => requestWithRetry(
+    (config) => client.post('/key-word/', data, config),  // key_word/ -> key-word/
     { maxRetries: 2, retryDelay: 2000, timeout: 30000 }
   ),
   
   // 키워드 분석 요청
   analyzeKeyword: (id) => requestWithRetry(
-    (config) => client.post(`/key_word/${id}/analyze/`, {}, config),
+    (config) => client.post(`/key-word/${id}/analyze/`, {}, config),  // key_word/ -> key-word/
     { maxRetries: 2, retryDelay: 2000, timeout: 60000 }
   ),
   
   // 키워드 상태 확인
   getKeywordStatus: (id) => requestWithRetry(
-    (config) => client.get(`/key_word/${id}/status/`, config),
+    (config) => client.get(`/key-word/${id}/status/`, config),  // key_word/ -> key-word/
     { maxRetries: 4, retryDelay: 1000, timeout: 20000 }
   ),
   
   // 키워드 업데이트
   updateKeyword: (id, data) => requestWithRetry(
-    (config) => client.put(`/key_word/${id}/`, data, config),
+    (config) => client.put(`/key-word/${id}/`, data, config),  // key_word/ -> key-word/
     { maxRetries: 2, retryDelay: 1000, timeout: 30000 }
   ),
   
   // 키워드 삭제
   deleteKeyword: (id) => requestWithRetry(
-    (config) => client.delete(`/key_word/${id}/`, config),
+    (config) => client.delete(`/key-word/${id}/`, config),  // key_word/ -> key-word/
     { maxRetries: 2, retryDelay: 1000, timeout: 20000 }
   )
 };
