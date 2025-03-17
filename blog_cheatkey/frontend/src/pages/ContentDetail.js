@@ -41,6 +41,28 @@ function ContentDetail() {
     loadContent();
   }, [id]);
 
+  // 콘텐츠에서 참고자료 섹션을 찾아 링크를 활성화하는 함수
+  const processContentWithActiveReferences = (htmlContent) => {
+    if (!htmlContent) return '';
+
+    // 참고자료 섹션을 찾기 위한 정규식
+    const referenceRegex = /(## 참고자료[\s\S]*)/;
+    const match = htmlContent.match(referenceRegex);
+    
+    if (!match) return htmlContent; // 참고자료 섹션이 없으면 원본 반환
+    
+    const beforeReferences = htmlContent.substring(0, match.index);
+    let referencesSection = match[0];
+    
+    // 마크다운 링크 형식([텍스트](URL))을 HTML 링크로 변환
+    referencesSection = referencesSection.replace(
+      /\[(.*?)\]\((https?:\/\/[^\s)]+)\)/g, 
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline">$1</a>'
+    );
+    
+    return beforeReferences + referencesSection;
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -67,6 +89,9 @@ function ContentDetail() {
       </div>
     );
   }
+
+  // 링크 활성화된 콘텐츠 가져오기
+  const processedContent = processContentWithActiveReferences(content.content?.replace(/\n/g, '<br>') || '');
 
   return (
     <div className="p-6">
@@ -141,7 +166,7 @@ function ContentDetail() {
           {/* 콘텐츠 탭 */}
           {activeTab === 'content' && (
             <div className="prose max-w-none">
-              <div dangerouslySetInnerHTML={{ __html: content.content?.replace(/\n/g, '<br>') || '' }} />
+              <div dangerouslySetInnerHTML={{ __html: processedContent }} />
               
               {/* 복사 버튼 */}
               <div className="mt-6">
