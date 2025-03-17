@@ -4,8 +4,8 @@ import re
 import logging
 import requests
 import base64
+from PIL import Image, ImageDraw
 from io import BytesIO
-from PIL import Image
 from django.conf import settings
 from django.core.files.base import ContentFile
 from openai import OpenAI
@@ -70,7 +70,8 @@ class ImageGenerator:
                             'id': image.id,
                             'url': image.image.url,
                             'subtopic': subtopic,
-                            'alt_text': image.alt_text
+                            'alt_text': image.alt_text,
+                            'is_infographic': image.is_infographic
                         })
             
             return generated_images
@@ -125,7 +126,8 @@ class ImageGenerator:
                         'id': image.id,
                         'url': image.image.url,
                         'subtopic': subtopic,
-                        'alt_text': image.alt_text
+                        'alt_text': image.alt_text,
+                        'is_infographic': image.is_infographic
                     }
             
             return None
@@ -318,42 +320,75 @@ class ImageGenerator:
             GeneratedImage: 저장된 이미지 객체
         """
         try:
-            # 이미지 다운로드
-            logger.info(f"이미지 다운로드 시도: {image_url}")
-            response = requests.get(image_url, timeout=10)
+            logger.info(f"이미지 다운로드 시작: URL={image_url}, 소제목={subtopic}")
+            
+            # 이미지 다운로드 (타임아웃 60초로 늘림)
+            response = requests.get(image_url, timeout=60)
             
             if response.status_code != 200:
                 logger.error(f"이미지 다운로드 실패: 상태 코드 {response.status_code}")
                 return None
             
-            # 다운로드한 데이터의 크기 확인
+            # 다운로드한 이미지 크기 확인
             content_length = len(response.content)
-            logger.info(f"다운로드한 데이터 크기: {content_length} 바이트")
+            logger.info(f"이미지 다운로드 완료: 크기={content_length} 바이트")
             
-            if content_length < 1000:  # 파일이 너무 작으면 의심
-                logger.warning(f"다운로드한 파일이 너무 작습니다: {content_length} 바이트")
+            # 작은 파일의 경우 내용 확인
+            if content_length < 1000:
+                logger.warning(f"이미지 크기가 너무 작습니다: {content_length} 바이트")
+                try:
+                    text_content = response.content.decode('utf-8', errors='ignore')
+                    logger.warning(f"작은 파일 내용: {text_content[:200]}")
+                except Exception as e:
+                    logger.warning(f"파일 내용 확인 실패: {str(e)}")
             
-            # 이미지 유효성 검사
-            try:
-                img = Image.open(BytesIO(response.content))
-                img_format = img.format
-                img_size = img.size
-                logger.info(f"이미지 확인: 형식={img_format}, 크기={img_size}")
-                
-                # 이미지 저장 전 확인
-                img.verify()  # 유효한 이미지인지 확인
-            except Exception as e:
-                logger.error(f"유효하지 않은 이미지: {str(e)}")
-                # 다운로드한 내용이 무엇인지 확인 (텍스트인 경우)
-                if content_length < 1000:
-                    try:
-                        logger.error(f"다운로드한 내용(일부): {response.content[:200]}")
-                    except:
-                        pass
-                return None
+            # 기본적으로 대체 이미지 사용 (작은 파일인 경우)
+            use_placeholder = content_length < 1000
             
-            # 이미지 파일 생성
-            image_content = ContentFile(response.content)
+            if not use_placeholder:
+                try:
+                    # 이미지 형식 확인
+                    img_io = BytesIO(response.content)
+                    img = Image.open(img_io)
+                    img_format = img.format
+                    img_size = img.size
+                    logger.info(f"이미지 형식: {img_format}, 크기: {img_size}")
+                except Exception as e:
+                    logger.error(f"이미지 형식 검증 실패: {str(e)}")
+                    use_placeholder = True
+            
+            # 대체 이미지 생성 및 저장
+            if use_placeholder:
+                try:
+                    # 대체 이미지 생성
+                    placeholder = Image.new('RGB', (800, 600), color=(73, 109, 137))
+                    draw = ImageDraw.Draw(placeholder)
+                    
+                    # 텍스트 추가
+                    draw.text((400, 300), f"{subtopic}\n(이미지 생성 실패)", fill=(255, 255, 255))
+                    
+                    # 메모리에 저장
+                    img_io = BytesIO()
+                    placeholder.save(img_io, format='PNG')
+                    img_io.seek(0)
+                    image_content = ContentFile(img_io.getvalue())
+                    logger.info("대체 이미지 생성 성공")
+                except Exception as e:
+                    logger.error(f"대체 이미지 생성 실패: {str(e)}")
+                    # 더미 이미지 - 간단한 1x1 투명 픽셀
+                    image_content = ContentFile(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82')
+            else:
+                # 원본 이미지 사용
+                image_content = ContentFile(response.content)
+            
+            # 미디어 경로 확인
+            media_path = settings.MEDIA_ROOT
+            generated_images_path = os.path.join(media_path, 'generated_images')
+            
+            # 디렉토리 확인 및 생성
+            if not os.path.exists(generated_images_path):
+                os.makedirs(generated_images_path, exist_ok=True)
+                logger.info(f"생성된 이미지 디렉토리 생성: {generated_images_path}")
             
             # 파일명 생성
             keyword_slug = blog_content.keyword.keyword.replace(' ', '_').lower()
@@ -366,14 +401,22 @@ class ImageGenerator:
                 blog_content=blog_content,
                 subtopic=subtopic,
                 prompt=prompt,
-                alt_text=alt_text[:200] if alt_text else "",  # 최대 200자로 제한
+                alt_text=alt_text[:200] if alt_text else "",
                 is_infographic=is_infographic
             )
+            
+            # 이미지 저장
             image.image.save(file_name, image_content, save=False)
             image.save()
             
-            # 저장 성공 로깅
+            # 파일 경로 확인
             logger.info(f"이미지 저장 성공: ID={image.id}, 경로={image.image.path}, URL={image.image.url}")
+            
+            # 파일이 실제로 존재하는지 확인
+            if os.path.exists(image.image.path):
+                logger.info(f"이미지 파일이 확인되었습니다: {os.path.getsize(image.image.path)} 바이트")
+            else:
+                logger.error(f"저장된 이미지 파일이 존재하지 않습니다: {image.image.path}")
             
             return image
             

@@ -8,6 +8,7 @@ class GeneratedImage(models.Model):
     image = models.ImageField(upload_to='generated_images/', verbose_name="이미지")
     prompt = models.TextField(blank=True, verbose_name="생성 프롬프트")
     alt_text = models.CharField(max_length=200, blank=True, verbose_name="대체 텍스트")
+    is_infographic = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="생성일")
     
     class Meta:

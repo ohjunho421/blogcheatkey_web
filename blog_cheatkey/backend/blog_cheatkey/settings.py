@@ -178,8 +178,6 @@ STATICFILES_DIRS = [
 
 # CSRF 설정
 CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
-
-# CSRF 쿠키 설정
 CSRF_COOKIE_SAMESITE = 'Lax'  # 또는 'None' (하지만 'None'인 경우 SECURE_COOKIE가 True여야 함)
 CSRF_COOKIE_HTTPONLY = False  # JavaScript에서 접근 가능하도록 설정
 CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False') == 'True'  # HTTPS 사용 시 True로 설정
@@ -187,6 +185,10 @@ CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False') == 'True'  # 
 # 미디어 파일 설정
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+DEFAULT_TIMEOUT = 300  # 5분 (300초)
 
 if DEBUG:
     print(f"MEDIA_ROOT 경로: {MEDIA_ROOT}")
