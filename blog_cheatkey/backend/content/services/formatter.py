@@ -1,6 +1,7 @@
 # formatter.py
 import re
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -170,22 +171,26 @@ class ContentFormatter:
         """
         references = []
         
-        # 참고자료 섹션 추출
-        if "## 참고자료" in content:
-            refs_section = content.split("## 참고자료")[1]
+        try:
+            # 참고자료 섹션 추출
+            if "## 참고자료" in content:
+                refs_section = content.split("## 참고자료")[1]
+                
+                # URL 추출 - 마크다운 링크 패턴 [제목](URL)
+                link_pattern = r'\[(.*?)\]\((https?:\/\/[^\s)]+)\)'
+                matches = re.findall(link_pattern, refs_section)
+                
+                for title, url in matches:
+                    references.append({
+                        'title': title.strip(),
+                        'url': url.strip()
+                    })
+                
+                # 결과 로깅
+                logger.info(f"추출된 참고자료 {len(references)}개: {json.dumps(references, ensure_ascii=False)}")
             
-            # URL 추출
-            urls = re.findall(r'\[.+?\]\((.+?)\)', refs_section)
-            
-            # 제목 추출
-            titles = re.findall(r'\[(.+?)\]', refs_section)
-            
-            # 참고 자료 맵핑
-            for i in range(min(len(urls), len(titles))):
-                references.append({
-                    'title': titles[i],
-                    'url': urls[i]
-                })
+        except Exception as e:
+            logger.error(f"참고자료 추출 중 오류: {str(e)}")
         
         return references
     
@@ -242,75 +247,3 @@ class ContentFormatter:
                 return True
         
         return False
-
-
-# 스크립트로 직접 실행될 경우 - 예시 사용법
-if __name__ == "__main__":
-    import django
-    import os
-    import sys
-    import argparse
-    
-    # Django 설정 로드
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'blog_cheatkey.settings')
-    django.setup()
-    
-    from content.models import BlogContent
-    
-    # 명령행 인자 파싱
-    parser = argparse.ArgumentParser(description='블로그 콘텐츠 포맷팅 도구')
-    parser.add_argument('--content-id', type=int, required=True, help='포맷팅할 콘텐츠 ID')
-    parser.add_argument('--type', choices=['mobile', 'references', 'both'], default='both', 
-                        help='포맷팅 유형 (mobile: 모바일 최적화, references: 참고자료 추가, both: 둘 다)')
-    
-    args = parser.parse_args()
-    
-    try:
-        # 콘텐츠 조회
-        content = BlogContent.objects.get(id=args.content_id)
-        
-        # 타입에 따른 포맷팅 수행
-        if args.type in ['mobile', 'both']:
-            formatted = ContentFormatter.format_for_mobile(content.content)
-            content.mobile_formatted_content = formatted
-            print(f"모바일 최적화 완료: {len(formatted)} 바이트")
-        
-        if args.type in ['references', 'both']:
-            # 연구 자료가 있는 경우에만 실행
-            if hasattr(content, 'keyword') and hasattr(content.keyword, 'research_sources'):
-                from research.models import ResearchSource
-                
-                # 연구 자료 가져오기
-                research_data = {
-                    'news': [],
-                    'academic': [],
-                    'general': []
-                }
-                
-                sources = ResearchSource.objects.filter(keyword=content.keyword)
-                for source in sources:
-                    source_data = {
-                        'title': source.title,
-                        'url': source.url,
-                        'snippet': source.snippet,
-                        'date': source.published_date.isoformat() if source.published_date else '',
-                        'source': source.author
-                    }
-                    research_data[source.source_type].append(source_data)
-                
-                formatted_with_refs = ContentFormatter.format_with_references(content.content, research_data)
-                content.content = formatted_with_refs
-                print(f"참고자료 추가 완료: {len(formatted_with_refs)} 바이트")
-                
-                # 참고자료 목록 추출
-                references = ContentFormatter.extract_references(formatted_with_refs)
-                content.references = references
-        
-        # 변경사항 저장
-        content.save()
-        print(f"콘텐츠 {args.content_id} 포맷팅 완료")
-        
-    except BlogContent.DoesNotExist:
-        print(f"ID {args.content_id}에 해당하는 콘텐츠를 찾을 수 없습니다.")
-    except Exception as e:
-        print(f"포맷팅 중 오류 발생: {str(e)}")

@@ -5,6 +5,8 @@ import re
 from django.conf import settings
 from openai import OpenAI
 
+# from research.services.collector import ResearchCollector 제거 (순환 참조 방지)
+
 logger = logging.getLogger(__name__)
 
 class KeywordAnalyzer:
@@ -131,6 +133,28 @@ class KeywordAnalyzer:
             logger.error(f"소제목 추천 중 오류 발생: {str(e)}")
             raise
     
+    # 이 메서드 추가
+    def collect_research_materials(self, keyword_id):
+        """
+        키워드 관련 연구 자료 수집 (ResearchCollector 사용)
+        
+        Args:
+            keyword_id (int): 키워드 ID
+            
+        Returns:
+            dict: 수집된 연구 자료 정보
+        """
+        # 필요한 시점에 임포트하여 순환 참조 방지
+        from research.services.collector import ResearchCollector
+        
+        try:
+            collector = ResearchCollector()
+            result = collector.collect_and_save(keyword_id)
+            return result
+        except Exception as e:
+            logger.error(f"연구 자료 수집 중 오류 발생: {str(e)}")
+            return None
+    
     def _parse_analysis_result(self, content):
         """
         분석 결과 파싱
@@ -185,167 +209,3 @@ class KeywordAnalyzer:
                     subtopics.append(subtitle)
         
         return subtopics[:4]  # 최대 4개의 소제목만 반환
-
-
-# research/forms.py
-from django import forms
-from research.models import ResearchSource
-
-class ResearchFilterForm(forms.Form):
-    """연구 자료 필터링 폼"""
-    TYPE_CHOICES = (
-        ('all', '전체'),
-        ('news', '뉴스'),
-        ('academic', '학술 자료'),
-        ('statistic', '통계 자료'),
-        ('general', '일반 자료'),
-    )
-    
-    source_type = forms.ChoiceField(
-        choices=TYPE_CHOICES,
-        required=False,
-        initial='all',
-        widget=forms.Select(attrs={'class': 'form-select'})
-    )
-    
-    search_query = forms.CharField(
-        required=False,
-        widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '검색어 입력'})
-    )
-
-
-# research/views.py
-import logging
-from django.shortcuts import render, redirect, get_object_or_404
-from django.views.generic import View, ListView, DetailView
-from django.contrib.auth.mixins import LoginRequiredMixin
-from django.urls import reverse
-from django.http import JsonResponse
-from django.contrib import messages
-from key_word.models import Keyword
-from research.models import ResearchSource, StatisticData
-from research.services.collector import ResearchCollector
-from research.forms import ResearchFilterForm
-
-logger = logging.getLogger(__name__)
-
-class ResearchListView(LoginRequiredMixin, ListView):
-    """연구 자료 목록 뷰"""
-    model = ResearchSource
-    template_name = 'research/list.html'
-    context_object_name = 'sources'
-    paginate_by = 10
-    
-    def get_queryset(self):
-        keyword_pk = self.kwargs.get('keyword_pk')
-        keyword = get_object_or_404(Keyword, pk=keyword_pk, user=self.request.user)
-        
-        queryset = ResearchSource.objects.filter(keyword=keyword)
-        
-        # 필터링
-        form = ResearchFilterForm(self.request.GET)
-        if form.is_valid():
-            source_type = form.cleaned_data.get('source_type')
-            search_query = form.cleaned_data.get('search_query')
-            
-            if source_type and source_type != 'all':
-                queryset = queryset.filter(source_type=source_type)
-            
-            if search_query:
-                queryset = queryset.filter(
-                    title__icontains=search_query) | queryset.filter(
-                    snippet__icontains=search_query)
-        
-        return queryset.order_by('-published_date', '-created_at')
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        keyword_pk = self.kwargs.get('keyword_pk')
-        context['keyword'] = get_object_or_404(Keyword, pk=keyword_pk, user=self.request.user)
-        context['filter_form'] = ResearchFilterForm(self.request.GET)
-        context['statistics'] = StatisticData.objects.filter(
-            source__keyword__id=keyword_pk).select_related('source')
-        return context
-
-class ResearchDetailView(LoginRequiredMixin, DetailView):
-    """연구 자료 상세 뷰"""
-    model = ResearchSource
-    template_name = 'research/detail.html'
-    context_object_name = 'source'
-    
-    def get_queryset(self):
-        return ResearchSource.objects.filter(keyword__user=self.request.user)
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['statistics'] = self.object.statistics.all()
-        return context
-
-class ResearchCreateView(LoginRequiredMixin, View):
-    """연구 자료 수집 뷰 (AJAX 요청 처리)"""
-    
-    def get(self, request, keyword_pk):
-        keyword = get_object_or_404(Keyword, pk=keyword_pk, user=request.user)
-        
-        # 이미 자료가 있는지 확인
-        sources_count = ResearchSource.objects.filter(keyword=keyword).count()
-        
-        return render(request, 'research/create.html', {
-            'keyword': keyword,
-            'sources_count': sources_count
-        })
-    
-    def post(self, request, keyword_pk):
-        keyword = get_object_or_404(Keyword, pk=keyword_pk, user=request.user)
-        
-        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            try:
-                # 연구 자료 수집 서비스 초기화
-                collector = ResearchCollector()
-                
-                # 수집 수행 (백그라운드 작업으로 변경 가능)
-                result = collector.collect_and_save(keyword.pk)
-                
-                if result:
-                    return JsonResponse({
-                        'status': 'success',
-                        'message': '연구 자료 수집이 완료되었습니다.',
-                        'data': {
-                            'news_count': len(result.get('news', [])),
-                            'academic_count': len(result.get('academic', [])),
-                            'general_count': len(result.get('general', [])),
-                            'statistics_count': len(result.get('statistics', []))
-                        }
-                    })
-                else:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '연구 자료 수집에 실패했습니다.'
-                    }, status=500)
-                
-            except Exception as e:
-                logger.error(f'연구 자료 수집 중 오류 발생: {str(e)}')
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f'연구 자료 수집 중 오류가 발생했습니다: {str(e)}'
-                }, status=500)
-        
-        # 일반 요청인 경우
-        try:
-            # 연구 자료 수집 서비스 초기화
-            collector = ResearchCollector()
-            
-            # 수집 수행
-            result = collector.collect_and_save(keyword.pk)
-            
-            if result:
-                messages.success(request, '연구 자료 수집이 완료되었습니다.')
-                return redirect('research:list', keyword_pk=keyword.pk)
-            else:
-                messages.error(request, '연구 자료 수집에 실패했습니다.')
-                return redirect('keyword:detail', pk=keyword.pk)
-                
-        except Exception as e:
-            logger.error(f'연구 자료 수집 중 오류 발생: {str(e)}')
-            messages.error(request, f'연구 자료 수집 중 오류가 발생했습니다: {str(e)}')
-            return redirect('keyword:detail', pk=keyword.pk)

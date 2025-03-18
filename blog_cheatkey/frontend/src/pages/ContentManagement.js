@@ -1,8 +1,10 @@
+// src/pages/ContentManagement.js
 import React, { useState, useEffect, useCallback } from 'react';
 import { contentService } from '../api/contentService';
 import { keywordService } from '../api/keywordService';
+import { researchService } from '../api/researchService'; // 추가된 import
 import { useNavigate } from 'react-router-dom';
-import BusinessInfoSelector from './BusinessInfoSelector'; // 새로 만든 컴포넌트 import
+import BusinessInfoSelector from './BusinessInfoSelector';
 
 function ContentManagement() {
   const [contents, setContents] = useState([]);
@@ -17,6 +19,13 @@ function ContentManagement() {
   const [generatingContent, setGeneratingContent] = useState(false);
   const [networkStatus, setNetworkStatus] = useState(navigator.onLine);
   const [retryCount, setRetryCount] = useState(0);
+  
+  // 연구 자료 수집 상태를 관리하는 state
+  const [collectingResearch, setCollectingResearch] = useState(false);
+  const [researchCollected, setResearchCollected] = useState(false);
+  const [researchStats, setResearchStats] = useState(null);
+  const [processingStep, setProcessingStep] = useState('');
+  
   const navigate = useNavigate();
 
   // 네트워크 상태 모니터링
@@ -129,16 +138,116 @@ function ContentManagement() {
 
   function handleKeywordChange(e) {
     setSelectedKeyword(e.target.value);
+    // 키워드가 변경되면 연구 자료 수집 상태 초기화
+    setResearchCollected(false);
+    setResearchStats(null);
   }
 
-  // 콘텐츠 생성 함수 - 재시도 로직 추가
+  // 연구 자료 수집 함수
+  const collectResearchData = async () => {
+    if (!selectedKeyword) {
+      setError('키워드를 선택해주세요.');
+      return false;
+    }
+    
+    // 필수 필드 검증
+    if (!businessName.trim() || !expertise.trim()) {
+      setError('업체명과 전문성/경력은 필수 입력 사항입니다.');
+      return false;
+    }
+    
+    try {
+      setCollectingResearch(true);
+      setProcessingStep('research');
+      setError(null);
+      
+      // 연구 자료 수집 API 호출
+      const response = await researchService.collectResearch(selectedKeyword);
+      
+      if (response.data) {
+        console.log('연구 자료 수집 응답:', response.data);
+        
+        // 연구 자료 수집 상태 확인 (폴링 방식)
+        let isCompleted = false;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 30; // 최대 30번 확인 (약 60초)
+        
+        while (!isCompleted && attempts < MAX_ATTEMPTS) {
+          attempts++;
+          
+          // 2초 지연
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          try {
+            // 연구 자료 수집 상태 확인
+            const statusResponse = await researchService.checkResearchStatus(selectedKeyword);
+            console.log('연구 자료 수집 상태:', statusResponse.data);
+            
+            if (statusResponse.data.status === 'completed') {
+              isCompleted = true;
+              
+              // 수집 결과 통계 설정
+              setResearchStats({
+                newsCount: statusResponse.data.data?.news_count || 0,
+                academicCount: statusResponse.data.data?.academic_count || 0,
+                generalCount: statusResponse.data.data?.general_count || 0,
+                statisticsCount: statusResponse.data.data?.statistics_count || 0
+              });
+              
+              setResearchCollected(true);
+              break;
+            } else if (statusResponse.data.status === 'failed') {
+              throw new Error(statusResponse.data.error || '연구 자료 수집 실패');
+            }
+          } catch (statusError) {
+            console.error('상태 확인 중 오류:', statusError);
+            // 오류가 발생해도 계속 시도
+          }
+        }
+        
+        // 시간 초과 또는 완료
+        if (!isCompleted) {
+          if (attempts >= MAX_ATTEMPTS) {
+            setError('연구 자료 수집 시간이 초과되었습니다. 다시 시도해주세요.');
+            setResearchCollected(false);
+            setCollectingResearch(false);
+            return false;
+          }
+        }
+        
+        setCollectingResearch(false);
+        return true;
+      } else {
+        throw new Error('응답 데이터가 없습니다');
+      }
+      
+    } catch (err) {
+      console.error('연구 자료 수집 실패:', err);
+      setError('연구 자료 수집 중 오류가 발생했습니다: ' + (err.message || '알 수 없는 오류'));
+      setCollectingResearch(false);
+      return false;
+    }
+  };
+
+  // 콘텐츠 생성 함수 - 재시도 로직 추가 및 연구 자료 수집 단계 통합
   const handleContentGeneration = async () => {
-    if (!selectedKeyword) return;
+    if (!selectedKeyword) {
+      setError('키워드를 선택해주세요.');
+      return;
+    }
     
     // 필수 필드 검증
     if (!businessName.trim() || !expertise.trim()) {
       setError('업체명과 전문성/경력은 필수 입력 사항입니다.');
       return;
+    }
+    
+    // 연구 자료 수집 단계
+    if (!researchCollected) {
+      const researchSuccess = await collectResearchData();
+      if (!researchSuccess) {
+        return;  // 연구 자료 수집 실패 시 중단
+      }
     }
     
     const MAX_RETRIES = 2;
@@ -149,6 +258,7 @@ function ContentManagement() {
         // 로딩 상태 설정
         setLoading(true);
         setGeneratingContent(true);
+        setProcessingStep('content');
         setError(null);
         
         // 형태소 처리: 공백으로 구분된 형태소들을 배열로 변환
@@ -224,6 +334,8 @@ function ContentManagement() {
               setBusinessName('');
               setExpertise('');
               setCustomMorphemes('');
+              setResearchCollected(false);
+              setResearchStats(null);
               
               // 성공 메시지
               setError(null);
@@ -283,6 +395,7 @@ function ContentManagement() {
       }
     };
     
+    // 연구 자료가 이미 수집되었거나 새로 수집 완료된 경우, 콘텐츠 생성 진행
     attemptContentGeneration();
   };
 
@@ -301,7 +414,7 @@ function ContentManagement() {
   }, [contents.length]);
 
   // 로딩 상태 표시
-  if (loading && !refreshing && !generatingContent) {
+  if (loading && !refreshing && !generatingContent && !collectingResearch) {
     return (
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
@@ -357,7 +470,7 @@ function ContentManagement() {
             className="w-full border rounded p-2"
             value={selectedKeyword}
             onChange={handleKeywordChange}
-            disabled={generatingContent || !networkStatus}
+            disabled={generatingContent || collectingResearch || !networkStatus}
           >
             <option value="">키워드 선택</option>
             {keywords.map((keyword) => (
@@ -381,7 +494,7 @@ function ContentManagement() {
           setBusinessName={setBusinessName}
           expertise={expertise}
           setExpertise={setExpertise}
-          disabled={generatingContent || !networkStatus}
+          disabled={generatingContent || collectingResearch || !networkStatus}
         />
         
         {/* 형태소 입력 필드 (선택) */}
@@ -395,7 +508,7 @@ function ContentManagement() {
             placeholder="추가하고 싶은 형태소를 띄어쓰기로 구분하여 입력하세요 (예: 자동차 수리 점검)"
             value={customMorphemes}
             onChange={(e) => setCustomMorphemes(e.target.value)}
-            disabled={generatingContent || !networkStatus}
+            disabled={generatingContent || collectingResearch || !networkStatus}
           />
           <p className="text-sm text-gray-500 mt-1">
             콘텐츠에 추가로 포함시키고 싶은 핵심 단어나 형태소를 입력하세요.
@@ -405,31 +518,74 @@ function ContentManagement() {
         {selectedKeyword && (
           <button 
             onClick={handleContentGeneration}
-            disabled={loading || generatingContent || !businessName.trim() || !expertise.trim() || !networkStatus}
+            disabled={loading || generatingContent || collectingResearch || !businessName.trim() || !expertise.trim() || !networkStatus}
             className={`text-white px-4 py-2 rounded w-full mt-4 ${
-              loading || generatingContent || !businessName.trim() || !expertise.trim() || !networkStatus
+              loading || generatingContent || collectingResearch || !businessName.trim() || !expertise.trim() || !networkStatus
                 ? 'bg-gray-400 cursor-not-allowed' 
-                : 'bg-green-500 hover:bg-green-600'
+                : researchCollected 
+                  ? 'bg-green-500 hover:bg-green-600'
+                  : 'bg-blue-500 hover:bg-blue-600'
             }`}
           >
-            {generatingContent ? '콘텐츠 생성 중...' : '콘텐츠 생성 시작'}
+            {generatingContent || collectingResearch 
+              ? processingStep === 'research' 
+                ? '연구 자료 수집 중...' 
+                : '콘텐츠 생성 중...'
+              : researchCollected
+                ? '콘텐츠 생성 시작'
+                : '자료 수집 후 콘텐츠 생성하기'
+            }
           </button>
         )}
         
-        {generatingContent && (
+        {/* 연구 자료 수집 결과 표시 */}
+        {researchCollected && researchStats && (
+          <div className="mt-4 bg-green-50 p-3 rounded border border-green-200">
+            <p className="text-green-700 font-medium">연구 자료 수집 완료</p>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <div className="bg-white p-2 rounded border border-green-100">
+                <p className="text-sm text-gray-600">뉴스 자료</p>
+                <p className="font-bold text-green-600">{researchStats.newsCount} 개</p>
+              </div>
+              <div className="bg-white p-2 rounded border border-green-100">
+                <p className="text-sm text-gray-600">학술 자료</p>
+                <p className="font-bold text-green-600">{researchStats.academicCount} 개</p>
+              </div>
+              <div className="bg-white p-2 rounded border border-green-100">
+                <p className="text-sm text-gray-600">일반 자료</p>
+                <p className="font-bold text-green-600">{researchStats.generalCount} 개</p>
+              </div>
+              <div className="bg-white p-2 rounded border border-green-100">
+                <p className="text-sm text-gray-600">통계 데이터</p>
+                <p className="font-bold text-green-600">{researchStats.statisticsCount} 개</p>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {(generatingContent || collectingResearch) && (
           <div className="mt-4 bg-yellow-50 p-3 rounded border border-yellow-200">
             <div className="flex items-center">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500 mr-2"></div>
               <div>
-                <p className="text-yellow-700">
-                  콘텐츠를 생성하고 있습니다. 이 작업은 1-2분 정도 소요될 수 있습니다.
-                </p>
-                <p className="text-sm text-yellow-600">
-                  생성 중에는 페이지를 벗어나지 마세요. 완료되면 자동으로 목록이 새로고침됩니다.
-                </p>
-                <p className="text-sm text-yellow-600 mt-1">
-                  만약 오류가 발생하면 자동으로 재시도합니다.
-                </p>
+                {processingStep === 'research' ? (
+                  <div>
+                    <p className="text-yellow-700">연구 자료를 수집하고 있습니다. 이 작업은 30초 정도 소요될 수 있습니다.</p>
+                    <p className="text-sm text-yellow-600">수집된 자료는 콘텐츠 생성에 활용됩니다.</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-yellow-700">
+                      콘텐츠를 생성하고 있습니다. 이 작업은 1-2분 정도 소요될 수 있습니다.
+                    </p>
+                    <p className="text-sm text-yellow-600">
+                      생성 중에는 페이지를 벗어나지 마세요. 완료되면 자동으로 목록이 새로고침됩니다.
+                    </p>
+                    <p className="text-sm text-yellow-600 mt-1">
+                      만약 오류가 발생하면 자동으로 재시도합니다.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

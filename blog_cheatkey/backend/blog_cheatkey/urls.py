@@ -16,6 +16,7 @@ urlpatterns = [
         path("content/", include("content.urls")),  # 콘텐츠 관련 API
         path("history/", include("history.urls")),  # 히스토리 관련 API
         path("title/", include("title.urls")),
+        path("research/", include("research.urls")),  # 연구 자료 수집 API 추가
         # 이미지 생성 API 추가
         path("images/", include([
             path("generate/<int:content_id>/", generate_images_for_content, name="generate_images"),

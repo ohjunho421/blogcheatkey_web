@@ -1,8 +1,8 @@
-# optimizier.py
 import re
 import json
 import logging
 import time
+import asyncio
 from django.conf import settings
 from konlpy.tag import Okt
 from anthropic import Anthropic
@@ -48,8 +48,8 @@ class ContentOptimizer:
                 
                 # 참고 자료 섹션 보존 (최적화된 콘텐츠에 추가)
                 if "## 참고자료" in content:
-                    ref_section = content.split("## 참고자료")[1]
                     if "## 참고자료" not in optimized_content:
+                        ref_section = content.split("## 참고자료")[1]
                         optimized_content += "\n\n## 참고자료" + ref_section
                 
                 # 모바일 최적화 포맷 생성 - formatter 사용
@@ -109,53 +109,6 @@ class ContentOptimizer:
                 'content_id': content_id
             }
     
-    def batch_optimize_contents(self, keyword_id=None, user_id=None, limit=10):
-        """
-        여러 콘텐츠를 일괄 최적화
-        
-        Args:
-            keyword_id (int, optional): 특정 키워드의 콘텐츠만 최적화
-            user_id (int, optional): 특정 사용자의 콘텐츠만 최적화
-            limit (int): 최대 처리할 콘텐츠 수
-            
-        Returns:
-            dict: 최적화 결과 요약
-        """
-        # 최적화할 콘텐츠 쿼리
-        query = BlogContent.objects.filter(is_optimized=False)
-        
-        if keyword_id:
-            query = query.filter(keyword_id=keyword_id)
-        
-        if user_id:
-            query = query.filter(user_id=user_id)
-        
-        content_ids = list(query.order_by('-created_at')[:limit].values_list('id', flat=True))
-        
-        results = {
-            'total': len(content_ids),
-            'successful': 0,
-            'failed': 0,
-            'details': []
-        }
-        
-        # 각 콘텐츠 최적화
-        for content_id in content_ids:
-            result = self.optimize_existing_content(content_id)
-            
-            if result.get('success', False):
-                results['successful'] += 1
-            else:
-                results['failed'] += 1
-            
-            results['details'].append({
-                'content_id': content_id,
-                'success': result.get('success', False),
-                'message': result.get('message', '')
-            })
-        
-        return results
-    
     def validate_and_optimize_content(self, content, keyword):
         """
         콘텐츠가 조건을 만족하는지 확인하고, 필요한 경우 최적화합니다.
@@ -212,48 +165,100 @@ class ContentOptimizer:
         # 조건을 만족하지 않을 경우 콘텐츠 최적화
         if not is_valid:
             try:
-                # 데이터 구성
-                morphemes = self.okt.morphs(keyword)
-                data = {
-                    'keyword': keyword,
-                    'morphemes': morphemes
-                }
+                # 최대 3번까지 최적화 시도
+                for attempt in range(3):
+                    # 데이터 구성
+                    morphemes = self.okt.morphs(keyword)
+                    data = {
+                        'keyword': keyword,
+                        'morphemes': morphemes
+                    }
+                    
+                    # 최적화 프롬프트 생성 및 API 호출
+                    optimization_prompt = self._create_optimization_prompt(
+                        content_without_refs, 
+                        data, 
+                        attempt > 0  # 두 번째 이상 시도일 경우 더 엄격한 요구사항
+                    )
+                    
+                    optimization_response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=4096,
+                        temperature=0.3,  # 더 결정적인 응답을 위해 온도 낮춤
+                        messages=[
+                            {"role": "user", "content": optimization_prompt}
+                        ]
+                    )
+                    
+                    optimized_content = optimization_response.content[0].text
+                    
+                    # 참고자료 섹션 다시 추가
+                    if refs_section and "## 참고자료" not in optimized_content:
+                        optimized_content = optimized_content + "\n\n" + refs_section
+                    
+                    # 최적화 결과 재검증
+                    optimized_char_count = len(optimized_content.replace(" ", ""))
+                    optimized_keyword_count = self._count_exact_word(keyword, optimized_content)
+                    optimized_morpheme_analysis = self.analyze_morphemes(optimized_content, keyword)
+                    
+                    # 결과 검증
+                    is_length_valid = 1700 <= optimized_char_count <= 2000
+                    is_keyword_valid = 17 <= optimized_keyword_count <= 20
+                    is_morphemes_valid = optimized_morpheme_analysis.get('is_valid', False)
+                    
+                    # 모든 조건이 만족되면 최적화 종료
+                    if is_length_valid and is_keyword_valid and is_morphemes_valid:
+                        result['optimized_content'] = optimized_content
+                        result['optimization_validation'] = {
+                            'char_count': {
+                                'count': optimized_char_count,
+                                'is_valid': is_length_valid
+                            },
+                            'keyword_count': {
+                                'count': optimized_keyword_count,
+                                'is_valid': is_keyword_valid
+                            },
+                            'morpheme_analysis': optimized_morpheme_analysis,
+                            'attempt': attempt + 1
+                        }
+                        break
+                    
+                    # 마지막 시도이거나 많이 개선되었으면 그대로 반환
+                    if attempt == 2 or (is_length_valid and is_keyword_valid):
+                        result['optimized_content'] = optimized_content
+                        result['optimization_validation'] = {
+                            'char_count': {
+                                'count': optimized_char_count,
+                                'is_valid': is_length_valid
+                            },
+                            'keyword_count': {
+                                'count': optimized_keyword_count,
+                                'is_valid': is_keyword_valid
+                            },
+                            'morpheme_analysis': optimized_morpheme_analysis,
+                            'attempt': attempt + 1,
+                            'warning': "모든 조건을 만족하지 않지만 최대한 최적화되었습니다."
+                        }
+                        break
                 
-                # 최적화 프롬프트 생성 및 API 호출
-                optimization_prompt = self._create_optimization_prompt(content_without_refs, data)
-                optimization_response = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=4096,
-                    temperature=0.5,
-                    messages=[
-                        {"role": "user", "content": optimization_prompt}
-                    ]
-                )
+                # 최적화 시도가 끝났으나 결과가 없으면
+                if 'optimized_content' not in result:
+                    result['optimized_content'] = optimized_content
+                    result['optimization_validation'] = {
+                        'char_count': {
+                            'count': optimized_char_count,
+                            'is_valid': is_length_valid
+                        },
+                        'keyword_count': {
+                            'count': optimized_keyword_count,
+                            'is_valid': is_keyword_valid
+                        },
+                        'morpheme_analysis': optimized_morpheme_analysis,
+                        'warning': "최적화 시도가 모두 실패했습니다. 마지막 결과를 반환합니다."
+                    }
                 
-                optimized_content = optimization_response.content[0].text
-                
-                # 참고자료 섹션 다시 추가
-                if refs_section:
-                    optimized_content = optimized_content + "\n\n" + refs_section
-                
-                # 최적화 결과 재검증
-                optimized_char_count = len(optimized_content.replace(" ", ""))
-                optimized_keyword_count = self._count_exact_word(keyword, optimized_content)
-                optimized_morpheme_analysis = self.analyze_morphemes(optimized_content, keyword)
-                
-                result['optimized_content'] = optimized_content
-                result['optimization_validation'] = {
-                    'char_count': {
-                        'count': optimized_char_count,
-                        'is_valid': 1700 <= optimized_char_count <= 2000
-                    },
-                    'keyword_count': {
-                        'count': optimized_keyword_count,
-                        'is_valid': 17 <= optimized_keyword_count <= 20
-                    },
-                    'morpheme_analysis': optimized_morpheme_analysis
-                }
             except Exception as e:
+                logger.error(f"콘텐츠 최적화 API 호출 중 오류: {str(e)}")
                 result['optimization_error'] = str(e)
         
         return result
@@ -291,6 +296,9 @@ class ContentOptimizer:
 
         # 형태소 분석
         for morpheme in morphemes:
+            if len(morpheme) < 2:  # 1글자 형태소는 건너뛰기 (의미있는 분석이 어려움)
+                continue
+                
             count = self._count_exact_word(morpheme, text)
             is_valid = 17 <= count <= 20
             
@@ -317,15 +325,28 @@ class ContentOptimizer:
         Returns:
             int: 단어의 출현 횟수
         """
-        pattern = rf'\b{word}\b|\b{word}(?=[\s.,!?])|(?<=[\s.,!?]){word}\b'
+        # 한글의 경우 경계가 명확하지 않아 다른 패턴 필요
+        if re.search(r'[가-힣]', word):
+            pattern = rf'(?<![가-힣]){re.escape(word)}(?![가-힣])'
+        else:
+            pattern = rf'\b{re.escape(word)}\b'
+        
         return len(re.findall(pattern, text))
     
-    def _create_optimization_prompt(self, content, data):
+    def _create_optimization_prompt(self, content, data, strict=False):
         """
         콘텐츠 최적화 프롬프트 생성
+        
+        Args:
+            content (str): 최적화할 콘텐츠
+            data (dict): 키워드와 형태소 정보
+            strict (bool): 더 엄격한 요구사항 적용 여부
         """
         keyword = data['keyword']
         morphemes = data.get('morphemes', self.okt.morphs(keyword))
+        
+        # 짧은 형태소 필터링 (의미 있는 분석이 어려움)
+        filtered_morphemes = [m for m in morphemes if len(m) >= 2]
         
         analysis = self.analyze_morphemes(content, keyword)
         current_counts = {word: info["count"] for word, info in analysis["morpheme_analysis"].items()}
@@ -345,19 +366,56 @@ class ContentOptimizer:
         - "{keyword}의 경우" → "이 경우"
         - "이", "이것", "해당", "이러한" 등의 지시어 활용
         """
+        
+        # 각 형태소 최적화 가이드
+        morpheme_guides = []
+        for morpheme in filtered_morphemes:
+            count = current_counts.get(morpheme, 0)
+            target = "17-20"
+            status = ""
+            
+            if count < 17:
+                status = f"현재 {count}회로 부족함. {17-count}회 이상 추가 필요"
+            elif count > 20:
+                status = f"현재 {count}회로 과다함. {count-20}회 이상 줄여야 함"
+            else:
+                status = f"이미 적정 범위({count}회)"
+                
+            morpheme_guides.append(f"- '{morpheme}': {status}")
+        
+        morpheme_guide_text = "\n".join(morpheme_guides)
+        
+        # 더 엄격한 요구사항 적용
+        strict_instructions = ""
+        if strict:
+            strict_instructions = """
+            ⚠️ 이전 최적화 시도가 실패했습니다. 이번에는 더 엄격하게 지침을 따라주세요:
+            
+            1. 각 형태소와 키워드의 출현 횟수를 **정확히** 17-20회 범위로 조정해야 합니다.
+            2. 각 형태소를 조정할 때 다른 형태소의 횟수가 함께 변하는 것에 주의하세요.
+            3. 필요하다면 문장 구조를 완전히 재구성할 수 있습니다.
+            4. 각 형태소의 현재 출현 횟수를 고려하여 과다한 것은 줄이고, 부족한 것은 늘리세요.
+            5. 최종 글자수가 정확히 1700-2000자 범위 내에 있어야 합니다.
+            6. 처음부터 새로 작성하지 말고, 현재 콘텐츠를 기반으로 수정하세요.
+            """
 
         return f"""
         다음 블로그 글을 최적화해주세요. 다음의 출현 횟수 제한을 반드시 지켜주세요:
 
         🎯 목표:
         1. 키워드 '{keyword}': 정확히 17-20회 사용
-        2. 각 형태소({', '.join(morphemes)}): 정확히 17-20회 사용
+        2. 중요 형태소: 각각 정확히 17-20회 사용
         3. 전체 글자수: 1700-2000자 (공백 제외)
         
         📊 현재 상태:
         - 글자수: {len(content.replace(" ", ""))}자
-        {chr(10).join([f"- '{word}': {count}회" for word, count in current_counts.items()])}
-
+        - '{keyword}': {current_counts.get(keyword, 0)}회
+        
+        📋 형태소별 최적화 가이드:
+        {morpheme_guide_text}
+        
+        {strict_instructions}
+        
         ✂️ 과다 사용된 단어 최적화 방법 (우선순위 순):
         {example_instructions}
 
@@ -369,68 +427,12 @@ class ContentOptimizer:
         - 전문성과 가독성의 균형 유지
         - 동의어/유의어 사용을 우선으로 하고, 자연스러운 경우에만 생략이나 지시어 사용
         - 내용의 주요 의미는 유지할 것
+        - 원본의 주요 내용과 구조를 최대한 유지하되, 형태소 빈도를 조정하세요
 
        원문:
        {content}
 
-       위 지침에 따라 과다 사용된 형태소들을 최적화하여 모든 형태소가 17-20회 범위 내에 들도록 
-       자연스럽게 수정해주세요. 전문성은 유지하되 읽기 쉽게 수정해주세요.
+       위 지침에 따라 모든 형태소가 17-20회 범위 내에 들도록 자연스럽게 수정해주세요.
+       전문성은 유지하되 읽기 쉽게 수정해주세요.
+       수정된 콘텐츠만 제공하고, 설명이나 다른 텍스트는 포함하지 마세요.
        """
-
-
-# 유틸리티 함수: CLI에서 실행 가능하도록 명령행 인터페이스 제공
-def run_optimizer(content_id=None, keyword_id=None, user_id=None, batch=False, limit=10):
-   """
-   최적화 실행 유틸리티 함수
-   
-   Args:
-       content_id (int, optional): 최적화할 콘텐츠 ID
-       keyword_id (int, optional): 특정 키워드의 콘텐츠만 최적화
-       user_id (int, optional): 특정 사용자의 콘텐츠만 최적화
-       batch (bool): 일괄 최적화 모드 여부
-       limit (int): 일괄 최적화시 최대 처리할 콘텐츠 수
-   """
-   optimizer = ContentOptimizer()
-   
-   if batch:
-       results = optimizer.batch_optimize_contents(keyword_id, user_id, limit)
-       print(f"일괄 최적화 완료: {results['successful']}/{results['total']} 성공")
-       return results
-   elif content_id:
-       result = optimizer.optimize_existing_content(content_id)
-       print(f"콘텐츠 {content_id} 최적화 결과: {result['message']}")
-       return result
-   else:
-       print("최적화할 콘텐츠 ID 또는 일괄 최적화 옵션을 지정해주세요.")
-       return {"error": "파라미터 오류"}
-
-
-# 스크립트로 직접 실행될 경우
-if __name__ == "__main__":
-   import django
-   import os
-   import sys
-   import argparse
-   
-   # Django 설정 로드
-   os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'blog_cheatkey.settings')
-   django.setup()
-   
-   # 명령행 인자 파싱
-   parser = argparse.ArgumentParser(description='블로그 콘텐츠 최적화 도구')
-   parser.add_argument('--content-id', type=int, help='최적화할 콘텐츠 ID')
-   parser.add_argument('--keyword-id', type=int, help='특정 키워드 ID의 콘텐츠만 최적화')
-   parser.add_argument('--user-id', type=int, help='특정 사용자 ID의 콘텐츠만 최적화')
-   parser.add_argument('--batch', action='store_true', help='일괄 최적화 모드')
-   parser.add_argument('--limit', type=int, default=10, help='일괄 최적화시 최대 처리할 콘텐츠 수')
-   
-   args = parser.parse_args()
-   
-   # 최적화 실행
-   run_optimizer(
-       content_id=args.content_id,
-       keyword_id=args.keyword_id,
-       user_id=args.user_id,
-       batch=args.batch,
-       limit=args.limit
-   )

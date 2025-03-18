@@ -35,6 +35,8 @@ DATABASES = {
 # API 키 설정 (필요에 따라 .env 파일에 설정)
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY','')
+
 
 # Application definition
 INSTALLED_APPS = [

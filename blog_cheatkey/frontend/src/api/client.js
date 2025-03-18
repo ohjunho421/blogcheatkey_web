@@ -62,26 +62,21 @@ client.interceptors.request.use(
   }
 );
 
-// src/api/client.js 파일에 인터셉터 추가
+// 응답 인터셉터 수정 - 자동 새로고침 제거
 client.interceptors.response.use(
   response => response,
   error => {
-    // 네트워크 오류 또는 타임아웃 확인
+    // 네트워크 오류 또는 타임아웃 발생 시 로그만 남기고, 자동 새로고침은 하지 않음
     if (!error.response || error.code === 'ECONNABORTED') {
-      console.log('네트워크 오류가 발생했습니다. 페이지를 새로고침합니다.');
+      console.log('네트워크 오류가 발생했습니다.');
       
-      // 사용자에게 알림 표시 (선택 사항)
-      const notification = document.createElement('div');
-      notification.textContent = '연결이 끊겼습니다. 3초 후 페이지가 새로고침됩니다...';
-      notification.style = 'position:fixed; top:0; left:0; right:0; background:red; color:white; padding:10px; text-align:center; z-index:9999;';
-      document.body.appendChild(notification);
-      
-      // 3초 후 새로고침
-      setTimeout(() => {
-        window.location.reload();
-      }, 3000);
+      // 개발 환경에서만 상세 로그 출력
+      if (process.env.NODE_ENV === 'development') {
+        console.error('오류 상세 정보:', error);
+      }
     }
     
+    // 오류를 그대로 전파하여 각 컴포넌트에서 처리할 수 있도록 함
     return Promise.reject(error);
   }
 );

@@ -2,6 +2,7 @@ import re
 import json
 import logging
 import time
+from urllib.parse import urlparse
 from django.conf import settings
 from konlpy.tag import Okt
 from anthropic import Anthropic
@@ -101,11 +102,14 @@ class ContentGenerator:
                     )
                     content = optimization_response.content[0].text
                 
-                # 모바일 최적화 포맷 생성
-                mobile_formatted_content = self._format_for_mobile(content)
-                
                 # 참고 자료 추가
                 content_with_references = self._add_references(content, data['research_data'])
+                
+                # 모바일 최적화 포맷 생성
+                mobile_formatted_content = self._format_for_mobile(content_with_references)
+                
+                # 참고 자료 목록 추출
+                references = self._extract_references(content_with_references)
                 
                 # 콘텐츠 저장
                 blog_content = BlogContent.objects.create(
@@ -113,8 +117,8 @@ class ContentGenerator:
                     keyword=keyword,
                     title=f"{keyword.keyword} 완벽 가이드",  # 기본 제목, 나중에 변경 가능
                     content=content_with_references,
-                    mobile_formatted_content=self._format_for_mobile(content_with_references),
-                    references=self._extract_references(content_with_references),
+                    mobile_formatted_content=mobile_formatted_content,
+                    references=references,  # 참고자료 목록 저장
                     char_count=len(content.replace(" ", "")),
                     is_optimized=True
                 )
@@ -246,10 +250,12 @@ class ContentGenerator:
         통계 자료 (반드시 1개 이상 활용):
         {statistics_text}
 
-        **추가 지시사항:**
-        1. 각 소제목 중 최소 2개 소제목에 대해서는 해당 소제목과 직접 연관된 기사나 통계자료를 최소 1건 이상 인용하여 내용을 보강해 주세요.
-        2. 생성된 글 내에 [숫자] 형태의 인용 표기가 있을 경우, 그 숫자에 해당하는 연구 자료의 링크를 활용하거나, 글의 참고자료 섹션에서 해당 링크를 명확하게 표시해 주세요.
-        예를 들어, "브레이크라이닝의 구조와 작동 원리[2][6]"라면, [2]와 [6]에 연결된 링크(출처)가 실제로 활용되도록 작성해 주세요.
+        **중요 참고자료 인용 지침:**
+        1. 본문에서 [1], [2]와 같은 인용번호 표시는 절대 사용하지 마세요.
+        2. 대신 "한국석유공사의 보고서에 따르면" 또는 "API의 연구 결과에 의하면" 등 출처 이름을 직접 언급하는 방식으로 인용하세요.
+        3. 참고자료의 출처명과 내용을 정확하게 언급해주세요. (예: "한국석유공사에 따르면 국내 자동차용 윤활유 수요는...")
+        4. 링크는 글 하단의 참고자료 섹션에 자동으로 추가되므로 본문에 URL을 포함하지 마세요.
+        5. 각 소제목 섹션에서 최소 1개 이상의 관련 참고자료를 출처를 명시하여 인용하세요.
 
         1. 글의 구조와 형식
         - 전체 구조: 서론(20%) - 본론(60%) - 결론(20%)
@@ -265,7 +271,7 @@ class ContentGenerator:
         반드시 다음 구조로 서론을 작성해주세요:
         1) 독자의 고민/문제 공감 (반드시 최신 통계나 연구 결과 인용)
         - 수집된 통계자료나 연구결과를 활용하여 문제의 심각성이나 중요성 강조
-        - "최근 연구에 따르면..." 또는 "...의 통계에 의하면..."과 같은 방식으로 시작
+        - "최근 한국석유공사의 조사에 따르면..." 또는 "미국석유협회의 통계에 의하면..."과 같은 방식으로 시작
         - "{keyword}에 대해 고민이 많으신가요?"
         - 타겟 독자의 구체적인 어려움 언급: {', '.join(target_audience.get('pain_points', []))}
         
@@ -291,7 +297,7 @@ class ContentGenerator:
         5. [필수] 참고 자료 활용
         - 각 소제목 섹션마다 최소 1개 이상의 관련 통계/연구 자료 반드시 인용
         - 인용할 때는 "~에 따르면", "~의 연구 결과", "~의 통계에 의하면" 등 명확한 표현 사용
-        - 모든 통계와 수치는 출처를 구체적으로 명시 (예: "2024년 OO연구소의 조사에 따르면...")
+        - 모든 통계와 수치는 출처를 구체적으로 명시 (예: "2024년 한국석유공사의 조사에 따르면...")
         - 가능한 최신 자료를 우선적으로 활용
         - 통계나 수치를 인용할 때는 그 의미나 시사점도 함께 설명
 
@@ -312,6 +318,7 @@ class ContentGenerator:
         """
         
         return prompt
+    
     def _needs_optimization(self, content, keyword):
         """
         콘텐츠가 최적화가 필요한지 판단
@@ -333,7 +340,6 @@ class ContentGenerator:
         # 아니면 분석 결과를 기반으로 판단
         # 하나라도 유효하지 않은 형태소가 있으면 최적화 필요
         return not analysis.get('is_valid', True)
-
 
     def _create_optimization_prompt(self, content, data):
         """
@@ -380,6 +386,7 @@ class ContentGenerator:
         - 전체 문맥의 자연스러움을 반드시 유지
         - 전문성과 가독성의 균형 유지
         - 동의어/유의어 사용을 우선으로 하고, 자연스러운 경우에만 생략이나 지시어 사용
+        - 본문에서 [1], [2]와 같은 인용번호는 절대로 사용하지 마세요. 대신 출처 이름을 직접 언급하세요.
 
         원문:
         {content}
@@ -450,6 +457,123 @@ class ContentGenerator:
         pattern = rf'\b{word}\b|\b{word}(?=[\s.,!?])|(?<=[\s.,!?]){word}\b'
         return len(re.findall(pattern, text))
 
+    def _add_references(self, content, research_data):
+        """
+        콘텐츠에 참고자료 섹션 추가
+        
+        Args:
+            content (str): 원본 콘텐츠
+            research_data (dict): 연구 자료 데이터
+            
+        Returns:
+            str: 참고자료가 추가된 콘텐츠
+        """
+        # 이미 참고자료 섹션이 있는지 확인
+        if "## 참고자료" in content:
+            return content
+        
+        # 인용된 참고자료 추출
+        references = []
+        
+        # 뉴스 자료 중 인용된 자료 찾기
+        for source in research_data.get('news', []):
+            if self._find_citation_in_content(content, source):
+                references.append({
+                    'title': source.get('title', ''),
+                    'url': source.get('url', ''),
+                    'source': source.get('source', '')
+                })
+        
+        # 학술 자료 중 인용된 자료 찾기
+        for source in research_data.get('academic', []):
+            if self._find_citation_in_content(content, source):
+                references.append({
+                    'title': source.get('title', ''),
+                    'url': source.get('url', ''),
+                    'source': source.get('source', '')
+                })
+        
+        # 일반 자료 중 인용된 자료 찾기
+        for source in research_data.get('general', []):
+            if self._find_citation_in_content(content, source):
+                references.append({
+                    'title': source.get('title', ''),
+                    'url': source.get('url', ''),
+                    'source': source.get('source', '')
+                })
+        
+        # 통계 자료의 출처 추가
+        for stat in research_data.get('statistics', []):
+            source_url = stat.get('source_url', '')
+            source_title = stat.get('source_title', '')
+            
+            # 이미 추가된 출처는 건너뛰기
+            if any(ref.get('url') == source_url for ref in references):
+                continue
+                
+            if source_url and source_title and self._find_citation_in_content(content, {'title': source_title, 'snippet': stat.get('context', '')}):
+                references.append({
+                    'title': source_title,
+                    'url': source_url,
+                    'source': stat.get('source', '')
+                })
+        
+        # 참고자료가 없으면 원본 그대로 반환
+        if not references:
+            return content
+        
+        # 참고자료 섹션 추가
+        reference_section = "\n\n## 참고자료\n"
+        
+        for i, ref in enumerate(references, 1):
+            title = ref.get('title', '제목 없음')
+            url = ref.get('url', '#')
+            source = ref.get('source', '')
+            
+            # 출처 정보 포함
+            if source:
+                reference_section += f"{i}. [{title}]({url}) - {source}\n"
+            else:
+                reference_section += f"{i}. [{title}]({url})\n"
+        
+        return content + reference_section
+
+    def _extract_references(self, content):
+        """
+        콘텐츠에서 참고자료 링크 추출
+        
+        Args:
+            content (str): 콘텐츠
+            
+        Returns:
+            list: 참고자료 목록
+        """
+        references = []
+        
+        # 참고자료 섹션 찾기
+        if "## 참고자료" in content:
+            refs_section = content.split("## 참고자료", 1)[1]
+            
+            # 마크다운 링크 추출 패턴
+            link_pattern = r'\[(.*?)\]\((.*?)\)'
+            matches = re.findall(link_pattern, refs_section)
+            
+            for title, url in matches:
+                # 출처 정보 추출 (있는 경우)
+                source = ""
+                if " - " in title:
+                    title_parts = title.split(" - ", 1)
+                    title = title_parts[0]
+                    source = title_parts[1]
+                
+                references.append({
+                    'title': title.strip(),
+                    'url': url.strip(),
+                    'source': source.strip()
+                })
+        
+        return references
+
     def _format_for_mobile(self, content):
         """
         모바일 화면에 최적화된 포맷으로 변환
@@ -493,38 +617,35 @@ class ContentGenerator:
         
         return '\n'.join(formatted_lines)
     
-    def _extract_references(self, content):
-        """
-        콘텐츠에서 참고 자료 목록 추출
-        """
-        references = []
-        
-        # 참고자료 섹션 추출
-        if "## 참고자료" in content:
-            refs_section = content.split("## 참고자료")[1]
-            
-            # URL 추출
-            urls = re.findall(r'\[.+?\]\((.+?)\)', refs_section)
-            
-            # 제목 추출
-            titles = re.findall(r'\[(.+?)\]', refs_section)
-            
-            # 참고 자료 맵핑
-            for i in range(min(len(urls), len(titles))):
-                references.append({
-                    'title': titles[i],
-                    'url': urls[i]
-                })
-        
-        return references
-    
     def _find_citation_in_content(self, content, source_info):
         """
         본문에서 인용 여부 확인
+        
+        Args:
+            content (str): 본문 콘텐츠
+            source_info (dict): 출처 정보
+            
+        Returns:
+            bool: 인용 여부
         """
         content_lower = content.lower()
         title = source_info.get('title', '').lower()
+        author = source_info.get('source', '').lower()
         snippet = source_info.get('snippet', '').lower()
+        
+        # 출처 이름 확인
+        source_name = None
+        if author and len(author) > 2:
+            source_name = author
+        elif title:
+            # 제목에서 가능한 출처 이름 추출 (첫 몇 단어)
+            title_words = title.split()
+            if len(title_words) >= 2:
+                source_name = ' '.join(title_words[:2])
+        
+        # 출처 이름이 본문에서 언급되었는지 확인
+        if source_name and source_name in content_lower:
+            return True
         
         # 인용 패턴 확인
         citation_patterns = [
@@ -563,94 +684,3 @@ class ContentGenerator:
                 return True
         
         return False
-    
-    def _add_references(self, content, research_data):
-        """
-        콘텐츠에 참고자료 추가
-        """
-        used_sources = []
-        all_sources = []
-        
-        # 1. 모든 소스 수집 및 분류
-        for source_type, items in research_data.items():
-            if not isinstance(items, list):
-                continue
-                    
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                title = item.get('title', '')
-                url = item.get('url', '')
-                snippet = item.get('snippet', '').lower()
-                date = item.get('date', '')
-                source = item.get('source', '')
-                
-                if not url:  # URL이 없는 경우 건너뛰기
-                    continue
-                
-                source_info = {
-                    'type': source_type,
-                    'title': title,
-                    'url': url,
-                    'date': date,
-                    'source': source,
-                    'snippet': snippet
-                }
-                
-                # 본문에서 사용된 자료 확인 (인용 여부 판단)
-                if self._find_citation_in_content(content, source_info):
-                    used_sources.append(source_info)
-                
-                all_sources.append(source_info)
-        
-        # 2. 본문에서 [n] 형식의 인용 표기 제거
-        clean_content = re.sub(r'\[\d+\]', '', content)
-        
-        # 3. 참고자료 섹션 추가
-        references_section = "\n\n---\n## 참고자료\n"
-        
-        # 본문에서 인용된 자료 (클릭 가능한 링크로 표시)
-        if used_sources:
-            references_section += "\n### 📚 본문에서 인용된 자료\n"
-            for idx, source in enumerate(used_sources, start=1):
-                title = source['title']
-                url = source['url']
-                date = source['date']
-                source_name = source['source']
-                
-                if date:
-                    references_section += f"{idx}. [{title}]({url}) ({date}) - {source_name}\n"
-                else:
-                    references_section += f"{idx}. [{title}]({url}) - {source_name}\n"
-        
-        # 추가 참고자료
-        references_section += "\n### 🔍 추가 참고자료\n"
-        
-        # 뉴스 자료
-        news_sources = [s for s in all_sources if s['type'] == 'news' and s not in used_sources]
-        if news_sources:
-            references_section += "\n#### 📰 뉴스 자료\n"
-            for idx, source in enumerate(news_sources, start=1):
-                if source['date']:
-                    references_section += f"{idx}. [{source['title']}]({source['url']}) ({source['date']}) - {source['source']}\n"
-                else:
-                    references_section += f"{idx}. [{source['title']}]({source['url']}) - {source['source']}\n"
-        
-        # 학술/연구 자료
-        academic_sources = [s for s in all_sources if s['type'] == 'academic' and s not in used_sources]
-        if academic_sources:
-            references_section += "\n#### 📚 학술/연구 자료\n"
-            for idx, source in enumerate(academic_sources, start=1):
-                references_section += f"{idx}. [{source['title']}]({source['url']})\n"
-        
-        # 일반 자료
-        general_sources = [s for s in all_sources if s['type'] == 'general' and s not in used_sources]
-        if general_sources:
-            references_section += "\n#### 🔍 일반 검색 결과\n"
-            for idx, source in enumerate(general_sources, start=1):
-                references_section += f"{idx}. [{source['title']}]({source['url']})\n"
-        
-        # 4. 정리된 본문과 참고자료 섹션 결합
-        final_content = clean_content.split("---")[0].strip() + references_section
-        
-        return final_content

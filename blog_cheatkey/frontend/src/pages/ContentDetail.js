@@ -13,6 +13,7 @@ function ContentDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('content'); // 'content', 'images', 'mobile', 'shorts'
+  const [references, setReferences] = useState([]);
 
   useEffect(() => {
     async function loadContent() {
@@ -27,6 +28,15 @@ function ContentDetail() {
         const response = await contentService.getContent(id);
         if (response && response.data) {
           setContent(response.data);
+          
+          // 참고자료 추출
+          if (response.data.references && Array.isArray(response.data.references)) {
+            setReferences(response.data.references);
+          } else {
+            // 직접 콘텐츠에서 참고자료 추출
+            const extractedRefs = extractReferencesFromContent(response.data.content || '');
+            setReferences(extractedRefs);
+          }
         } else {
           setError('콘텐츠 데이터를 불러오지 못했습니다.');
         }
@@ -40,6 +50,28 @@ function ContentDetail() {
 
     loadContent();
   }, [id]);
+
+  // 콘텐츠에서 참고자료를 추출하는 함수
+  const extractReferencesFromContent = (contentText) => {
+    const refs = [];
+    
+    // 참고자료 섹션 찾기
+    const refSection = contentText.match(/## 참고자료[\s\S]*/);
+    if (!refSection) return refs;
+    
+    // 링크 추출 (마크다운 형식 [제목](URL))
+    const linkRegex = /\[(.*?)\]\((https?:\/\/[^\s)]+)\)/g;
+    let match;
+    
+    while ((match = linkRegex.exec(refSection[0])) !== null) {
+      refs.push({
+        title: match[1],
+        url: match[2]
+      });
+    }
+    
+    return refs;
+  };
 
   // 콘텐츠에서 참고자료 섹션을 찾아 링크를 활성화하는 함수
   const processContentWithActiveReferences = (htmlContent) => {
@@ -67,6 +99,39 @@ function ContentDetail() {
     );
     
     return beforeReferences + referencesSection;
+  };
+
+  // 참고자료 컴포넌트
+  const ReferencesSection = () => {
+    if (!references || references.length === 0) {
+      return (
+        <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-medium mb-3">참고자료</h3>
+          <p className="text-gray-500">추출된 참고자료가 없습니다.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+        <h3 className="text-lg font-medium mb-3">사용된 자료 바로가기</h3>
+        <ul className="space-y-2">
+          {references.map((ref, index) => (
+            <li key={index} className="flex justify-between items-center">
+              <span className="text-gray-800 flex-1 mr-4">{index + 1}. {ref.title}</span>
+              <a 
+                href={ref.url} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm whitespace-nowrap"
+              >
+                방문하기
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
   };
 
   if (loading) {
@@ -121,8 +186,11 @@ function ContentDetail() {
           </span>
         </div>
         
+        {/* 참고자료 바로가기 섹션 (항상 표시) */}
+        <ReferencesSection />
+        
         {/* 탭 네비게이션 */}
-        <div className="border-b border-gray-200 mb-6">
+        <div className="border-b border-gray-200 mb-6 mt-6">
           <nav className="-mb-px flex space-x-6">
             <button
               onClick={() => setActiveTab('content')}
