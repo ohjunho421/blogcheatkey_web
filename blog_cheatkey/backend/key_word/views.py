@@ -86,6 +86,73 @@ class KeywordViewSet(viewsets.ModelViewSet):
             import traceback
             logger.error(f"키워드 분석 중 예외 발생: {str(e)}\n{traceback.format_exc()}")
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['post'])
+    def update_intent(self, request, pk=None):
+        """
+        키워드의 검색 의도, 필요 정보, pain points 등을 업데이트
+        """
+        keyword = self.get_object()
+        
+        try:
+            data = request.data
+            
+            # 검색 의도 업데이트
+            if 'main_intent' in data:
+                keyword.main_intent = data['main_intent']
+            
+            # 필요 정보 업데이트
+            if 'info_needed' in data:
+                keyword.info_needed = data['info_needed']
+                
+            # pain points 업데이트
+            if 'pain_points' in data:
+                keyword.pain_points = data['pain_points']
+                
+            keyword.save()
+            
+            return Response({
+                "message": "키워드 분석 정보가 성공적으로 업데이트되었습니다.",
+                "data": KeywordSerializer(keyword).data
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['post'])
+    def update_subtopics(self, request, pk=None):
+        """
+        키워드의 소제목 목록을 업데이트
+        """
+        keyword = self.get_object()
+        
+        try:
+            data = request.data
+            if 'subtopics' not in data or not isinstance(data['subtopics'], list):
+                return Response({"error": "소제목 목록이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # 기존 소제목 삭제
+            keyword.subtopics.all().delete()
+            
+            # 새 소제목 추가
+            for i, title in enumerate(data['subtopics']):
+                if isinstance(title, dict) and 'title' in title:
+                    title = title['title']
+                    
+                if not isinstance(title, str):
+                    continue
+                    
+                Subtopic.objects.create(
+                    keyword=keyword,
+                    title=title,
+                    order=i
+                )
+            
+            return Response({
+                "message": "소제목이 성공적으로 업데이트되었습니다.",
+                "data": KeywordSerializer(keyword).data
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SubtopicViewSet(viewsets.ModelViewSet):
     serializer_class = SubtopicSerializer
@@ -103,3 +170,33 @@ class SubtopicViewSet(viewsets.ModelViewSet):
         order = (last_order.order + 1) if last_order else 0
         
         serializer.save(keyword=keyword, order=order)
+        
+    @action(detail=False, methods=['post'])
+    def reorder(self, request):
+        """
+        소제목 순서 변경
+        """
+        try:
+            data = request.data
+            if 'subtopics' not in data or not isinstance(data['subtopics'], list):
+                return Response({"error": "소제목 목록이 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+                
+            # 소제목 순서 업데이트
+            for i, item in enumerate(data['subtopics']):
+                if 'id' not in item:
+                    continue
+                    
+                subtopic = Subtopic.objects.filter(
+                    id=item['id'], 
+                    keyword__user=request.user
+                ).first()
+                
+                if subtopic:
+                    subtopic.order = i
+                    if 'title' in item:
+                        subtopic.title = item['title']
+                    subtopic.save()
+            
+            return Response({"message": "소제목 순서가 업데이트되었습니다."})
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

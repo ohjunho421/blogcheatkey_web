@@ -9,6 +9,13 @@ const KeywordManagement = () => {
   const [newKeyword, setNewKeyword] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [editingSubtopic, setEditingSubtopic] = useState({ keywordId: null, index: null, value: '' });
+  
+  // 키워드 타겟 정보 편집 상태
+  const [editingTargetInfo, setEditingTargetInfo] = useState({ keywordId: null, field: null });
+  const [editValue, setEditValue] = useState('');
+  const [editingPainPoints, setEditingPainPoints] = useState([]);
+  const [editingInfoNeeded, setEditingInfoNeeded] = useState([]);
+  const [updateMessage, setUpdateMessage] = useState('');
 
   // 키워드 목록 로드
   useEffect(() => {

@@ -22,34 +22,63 @@ class BlogContentViewSet(viewsets.ModelViewSet):
         keyword_id = request.data.get('keyword_id')
         target_audience = request.data.get('target_audience', {})
         business_info = request.data.get('business_info', {})
+        custom_morphemes = request.data.get('custom_morphemes', [])
         
         if not keyword_id:
             return Response({"error": "keyword_id is required"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
+            # 키워드 존재 확인
+            keyword = Keyword.objects.get(id=keyword_id)
+            
+            # 이미 존재하는 콘텐츠 확인
+            existing_content = BlogContent.objects.filter(
+                user=request.user,
+                keyword=keyword
+            ).order_by('-created_at').first()
+            
+            # 최근 1시간 이내에 생성된 콘텐츠가 있으면 그대로 반환
+            if existing_content:
+                import time
+                from datetime import datetime, timedelta
+                
+                one_hour_ago = datetime.now() - timedelta(hours=1)
+                if existing_content.created_at > one_hour_ago:
+                    return Response({
+                        "message": "이미 생성된 콘텐츠가 있습니다.",
+                        "data": BlogContentSerializer(existing_content).data
+                    })
+            
             # 콘텐츠 생성 서비스 초기화
             generator = ContentGenerator()
             
-            # 콘텐츠 생성
+            # 콘텐츠 생성 (custom_morphemes 추가)
             content_id = generator.generate_content(
                 keyword_id=keyword_id,
                 user_id=request.user.id,
                 target_audience=target_audience,
-                business_info=business_info
+                business_info=business_info,
+                custom_morphemes=custom_morphemes
             )
             
             if content_id:
-                content = BlogContent.objects.get(id=content_id)
-                return Response({
-                    "message": "콘텐츠가 성공적으로 생성되었습니다.",
-                    "data": BlogContentSerializer(content).data
-                })
+                # 생성된 콘텐츠 가져오기
+                try:
+                    content = BlogContent.objects.get(id=content_id)
+                    return Response({
+                        "message": "콘텐츠가 성공적으로 생성되었습니다.",
+                        "data": BlogContentSerializer(content).data
+                    })
+                except BlogContent.DoesNotExist:
+                    return Response({"error": "생성된 콘텐츠를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
             else:
                 return Response({"error": "콘텐츠 생성에 실패했습니다."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
                 
         except Keyword.DoesNotExist:
             return Response({"error": "Invalid keyword_id"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
+            import traceback
+            print(traceback.format_exc())
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['post'])
@@ -100,12 +129,13 @@ class BlogContentViewSet(viewsets.ModelViewSet):
                 content.morpheme_analyses.all().delete()
                 new_analysis = generator.analyze_morphemes(optimized_content, content.keyword.keyword)
                 for morpheme, info in new_analysis.get('morpheme_analysis', {}).items():
-                    MorphemeAnalysis.objects.create(
-                        content=content,
-                        morpheme=morpheme,
-                        count=info.get('count', 0),
-                        is_valid=info.get('is_valid', False)
-                    )
+                    if morpheme and len(morpheme) > 1:  # 1글자 미만은 저장하지 않음
+                        MorphemeAnalysis.objects.create(
+                            content=content,
+                            morpheme=morpheme,
+                            count=info.get('count', 0),
+                            is_valid=info.get('is_valid', False)
+                        )
                 
                 return Response({
                     "message": "콘텐츠가 성공적으로 최적화되었습니다.",
@@ -115,6 +145,8 @@ class BlogContentViewSet(viewsets.ModelViewSet):
                 return Response({"message": "이미 최적화된 콘텐츠입니다."})
                 
         except Exception as e:
+            import traceback
+            print(traceback.format_exc())
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['get'])
@@ -138,4 +170,3 @@ class BlogContentViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-

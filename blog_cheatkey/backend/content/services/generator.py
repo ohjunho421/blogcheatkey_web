@@ -13,6 +13,7 @@ from accounts.models import User
 
 logger = logging.getLogger(__name__)
 
+
 class ContentGenerator:
     """
     Claude API를 사용한 블로그 콘텐츠 생성 서비스
@@ -26,7 +27,7 @@ class ContentGenerator:
         self.max_retries = 3
         self.retry_delay = 2
     
-    def generate_content(self, keyword_id, user_id, target_audience=None, business_info=None):
+    def generate_content(self, keyword_id, user_id, target_audience=None, business_info=None, custom_morphemes=None):
         """
         키워드 기반 블로그 콘텐츠 생성
         
@@ -35,6 +36,7 @@ class ContentGenerator:
             user_id (int): 사용자 ID
             target_audience (dict): 타겟 독자 정보
             business_info (dict): 사업자 정보
+            custom_morphemes (list): 사용자 지정 형태소 목록
             
         Returns:
             int: 생성된 BlogContent 객체의 ID
@@ -52,8 +54,16 @@ class ContentGenerator:
                 general_sources = ResearchSource.objects.filter(keyword=keyword, source_type='general')
                 statistics = StatisticData.objects.filter(source__keyword=keyword)
                 
+                # 이미 생성된 콘텐츠가 있는지 확인
+                existing_content = BlogContent.objects.filter(keyword=keyword, user=user).order_by('-created_at').first()
+                
                 # 형태소 분석
                 morphemes = self.okt.morphs(keyword.keyword)
+                
+                # 사용자 지정 형태소 추가
+                if custom_morphemes:
+                    morphemes.extend(custom_morphemes)
+                    morphemes = list(set(morphemes))  # 중복 제거
                 
                 # 데이터 구성
                 data = {
@@ -75,6 +85,12 @@ class ContentGenerator:
                         statistics
                     )
                 }
+                
+                # 이미 생성 중인 콘텐츠가 있는지 확인 (1시간 이내)
+                one_hour_ago = time.time() - 3600
+                if existing_content and existing_content.created_at.timestamp() > one_hour_ago:
+                    logger.info(f"이미 생성된 콘텐츠가 있습니다: {existing_content.id}")
+                    return existing_content.id
                 
                 # 프롬프트 생성 및 콘텐츠 생성
                 prompt = self._create_content_prompt(data)
@@ -111,6 +127,11 @@ class ContentGenerator:
                 # 참고 자료 목록 추출
                 references = self._extract_references(content_with_references)
                 
+                # 이전 콘텐츠가 있다면 삭제
+                if existing_content:
+                    # 형태소 분석 결과도 같이 삭제됨 (CASCADE)
+                    existing_content.delete()
+                
                 # 콘텐츠 저장
                 blog_content = BlogContent.objects.create(
                     user=user,
@@ -124,14 +145,15 @@ class ContentGenerator:
                 )
                 
                 # 형태소 분석 결과 저장
-                morpheme_analysis = self.analyze_morphemes(content, keyword.keyword)
+                morpheme_analysis = self.analyze_morphemes(content, keyword.keyword, custom_morphemes)
                 for morpheme, info in morpheme_analysis.get('morpheme_analysis', {}).items():
-                    MorphemeAnalysis.objects.create(
-                        content=blog_content,
-                        morpheme=morpheme,
-                        count=info.get('count', 0),
-                        is_valid=info.get('is_valid', False)
-                    )
+                    if morpheme and len(morpheme) > 1:  # 1글자 미만은 저장하지 않음
+                        MorphemeAnalysis.objects.create(
+                            content=blog_content,
+                            morpheme=morpheme,
+                            count=info.get('count', 0),
+                            is_valid=info.get('is_valid', False)
+                        )
                 
                 return blog_content.id
                 
@@ -428,6 +450,10 @@ class ContentGenerator:
 
         # 형태소 분석
         for morpheme in morphemes:
+            # 2글자 미만 형태소는 분석에서 제외
+            if len(morpheme) < 2:
+                continue
+                
             count = self._count_exact_word(morpheme, text)
             is_valid = 17 <= count <= 20
             
