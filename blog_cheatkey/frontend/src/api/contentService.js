@@ -64,13 +64,25 @@ export const contentService = {
     { maxRetries: 3, retryDelay: 1000, timeout: 30000 }
   ),
   
-  // 콘텐츠 생성 (더 긴 타임아웃 필요)
+  // 콘텐츠 생성 (백그라운드 처리 대응)
   createContent: (data) => requestWithRetry(
     (config) => client.post('/content/generate/', data, config),
-    { maxRetries: 2, retryDelay: 2000, timeout: 120000 } // 2분 타임아웃
+    { maxRetries: 2, retryDelay: 2000, timeout: 30000 } // 짧은 타임아웃으로 변경
   ),
   
-  // 콘텐츠 상태 확인
+  // 콘텐츠 생성 상태 확인 메서드 추가
+  getContentGenerationStatus: (keywordId) => requestWithRetry(
+    (config) => client.get(`/content/status/?keyword_id=${keywordId}`, config),
+    { maxRetries: 5, retryDelay: 1000, timeout: 20000 }
+  ),
+  
+  // 콘텐츠 최적화 상태 확인 메서드 추가
+  getOptimizationStatus: (contentId) => requestWithRetry(
+    (config) => client.get(`/content/${contentId}/optimize_status/`, config),
+    { maxRetries: 5, retryDelay: 1000, timeout: 20000 }
+  ),
+  
+  // 콘텐츠 상태 확인 (기존 메서드는 유지)
   getContentStatusByKeyword: (keywordId) => requestWithRetry(
     (config) => client.get(`/content/status/${keywordId}/`, config),
     { maxRetries: 5, retryDelay: 1000, timeout: 20000 }

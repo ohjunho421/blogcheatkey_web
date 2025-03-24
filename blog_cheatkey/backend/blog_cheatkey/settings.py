@@ -32,6 +32,14 @@ DATABASES = {
     }
 }
 
+# 캐시 설정 추가
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
 # API 키 설정 (필요에 따라 .env 파일에 설정)
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')

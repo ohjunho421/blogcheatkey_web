@@ -14,7 +14,7 @@ class ContentSummarizer:
     def __init__(self):
         self.anthropic_api_key = settings.ANTHROPIC_API_KEY
         self.client = Anthropic(api_key=self.anthropic_api_key)
-        self.model = "claude-3-opus-20240229"
+        self.model = "claude-3-7-sonnet-20250219"
     
     def create_summary(self, content_id, summary_type='vrew'):
         """

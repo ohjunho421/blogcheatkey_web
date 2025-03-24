@@ -19,6 +19,8 @@ function ContentManagement() {
   const [generatingContent, setGeneratingContent] = useState(false);
   const [networkStatus, setNetworkStatus] = useState(navigator.onLine);
   const [retryCount, setRetryCount] = useState(0);
+  // 추가된 상태 변수 - 상태 폴링을 위한 인터벌
+  const [statusCheckInterval, setStatusCheckInterval] = useState(null);
   
   // 연구 자료 수집 상태를 관리하는 state
   const [collectingResearch, setCollectingResearch] = useState(false);
@@ -229,7 +231,7 @@ function ContentManagement() {
     }
   };
 
-  // 콘텐츠 생성 함수 - 재시도 로직 추가 및 연구 자료 수집 단계 통합
+  // 콘텐츠 생성 함수 - 새로운 백그라운드 처리 방식으로 수정
   const handleContentGeneration = async () => {
     if (!selectedKeyword) {
       setError('키워드를 선택해주세요.');
@@ -250,154 +252,105 @@ function ContentManagement() {
       }
     }
     
-    const MAX_RETRIES = 2;
-    let currentRetry = 0;
+    try {
+      // 로딩 상태 설정
+      setLoading(true);
+      setGeneratingContent(true);
+      setProcessingStep('content');
+      setError(null);
+      
+      // 형태소 처리
+      const morphemesArray = customMorphemes.trim() 
+        ? customMorphemes.split(/\s+/).filter(m => m.trim() !== '') 
+        : [];
+      
+      // 백엔드가 예상하는 정확한 데이터 형식으로 요청
+      const requestData = {
+        keyword_id: selectedKeyword,
+        target_audience: {},
+        business_info: {
+          name: businessName,
+          expertise: expertise
+        },
+        custom_morphemes: morphemesArray
+      };
+      
+      console.log('콘텐츠 생성 요청 데이터:', requestData);
+      
+      // 백그라운드에서 콘텐츠 생성 시작
+      const response = await contentService.createContent(requestData);
+      console.log('콘텐츠 생성 응답:', response.data);
+      
+      // 상태 폴링 시작
+      startStatusPolling(selectedKeyword);
+      
+    } catch (err) {
+      console.error('콘텐츠 생성 실패:', err);
+      setError('콘텐츠 생성 중 오류가 발생했습니다: ' + (err.message || '알 수 없는 오류'));
+      setGeneratingContent(false);
+      setLoading(false);
+    }
+  };
+  
+  // 상태 폴링 함수 추가
+  const startStatusPolling = (keywordId) => {
+    // 이전 인터벌 정리
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+    }
     
-    const attemptContentGeneration = async () => {
+    // 5초마다 상태 확인
+    const intervalId = setInterval(async () => {
       try {
-        // 로딩 상태 설정
-        setLoading(true);
-        setGeneratingContent(true);
-        setProcessingStep('content');
-        setError(null);
+        const statusResponse = await contentService.getContentGenerationStatus(keywordId);
+        console.log('상태 확인 응답:', statusResponse.data);
         
-        // 형태소 처리: 공백으로 구분된 형태소들을 배열로 변환
-        const morphemesArray = customMorphemes.trim() 
-          ? customMorphemes.split(/\s+/).filter(m => m.trim() !== '') 
-          : [];
-        
-        // 백엔드가 예상하는 정확한 데이터 형식으로 요청
-        const requestData = {
-          keyword_id: selectedKeyword,
-          // 필요한 추가 필드
-          target_audience: {},
-          business_info: {
-            name: businessName,
-            expertise: expertise
-          },
-          custom_morphemes: morphemesArray
-        };
-        
-        console.log('콘텐츠 생성 요청 데이터:', requestData);
-        
-        const response = await contentService.createContent(requestData);
-        console.log('콘텐츠 생성 응답:', response.data);
-        
-        // 콘텐츠 생성 요청 후 상태 확인 함수
-        let retryDelay = 2000; // 초기 2초
-        const maxDelay = 10000; // 최대 10초
-        let statusCheckRetries = 0;
-        const MAX_STATUS_CHECK_RETRIES = 30; // 최대 30번 시도 (약 5분)
-        
-        const checkContentStatus = async () => {
-          try {
-            if (statusCheckRetries >= MAX_STATUS_CHECK_RETRIES) {
-              setError('콘텐츠 생성 시간이 너무 오래 걸립니다. 나중에 다시 시도해주세요.');
-              setGeneratingContent(false);
-              setLoading(false);
-              return;
-            }
-            
-            statusCheckRetries++;
-            
-            // 키워드 ID로 연결된 콘텐츠 상태 확인
-            const statusResponse = await contentService.getContentStatusByKeyword(selectedKeyword);
-            console.log('콘텐츠 상태 확인:', statusResponse.data);
-            
-            if (statusResponse.data.is_completed) {
-              // 콘텐츠 생성이 완료되면 전체 콘텐츠 목록 새로고침
-              try {
-                const refreshedContents = await contentService.getContents();
-                
-                let contentData = [];
-                if (Array.isArray(refreshedContents.data)) {
-                  contentData = refreshedContents.data;
-                } else if (refreshedContents.data.results && Array.isArray(refreshedContents.data.results)) {
-                  contentData = refreshedContents.data.results;
-                }
-                
-                setContents(contentData);
-                
-                // 로컬 스토리지에 캐싱
-                localStorage.setItem('cachedContentData', JSON.stringify(contentData));
-                
-              } catch (err) {
-                console.error('콘텐츠 목록 새로고침 실패:', err);
-                // 에러가 발생해도 진행은 계속
-              }
-              
-              setGeneratingContent(false);
-              setLoading(false);
-              
-              // 입력 필드 초기화
-              setSelectedKeyword('');
-              setBusinessName('');
-              setExpertise('');
-              setCustomMorphemes('');
-              setResearchCollected(false);
-              setResearchStats(null);
-              
-              // 성공 메시지
-              setError(null);
-              
-              return;
-            } else if (statusResponse.data.has_error) {
-              // 오류 발생
-              setError('콘텐츠 생성 중 오류가 발생했습니다.');
-              setGeneratingContent(false);
-              setLoading(false);
-              return;
-            }
-            
-            // 아직 생성 중이면 점점 더 긴 간격으로 다시 확인
-            retryDelay = Math.min(retryDelay * 1.5, maxDelay);
-            setTimeout(checkContentStatus, retryDelay);
-          } catch (err) {
-            console.error('콘텐츠 상태 확인 실패:', err);
-            
-            // 네트워크 오류인 경우 재시도
-            setTimeout(checkContentStatus, retryDelay);
-          }
-        };
-        
-        // 콘텐츠 상태 확인 시작
-        setTimeout(checkContentStatus, retryDelay);
+        // 상태에 따라 처리
+        if (statusResponse.data.status === 'completed') {
+          // 완료된 경우
+          clearInterval(intervalId);
+          
+          // 완료 처리
+          setGeneratingContent(false);
+          setLoading(false);
+          
+          // 전체 콘텐츠 목록 새로고침
+          loadData();
+          
+          // 입력 필드 초기화
+          setSelectedKeyword('');
+          setBusinessName('');
+          setExpertise('');
+          setCustomMorphemes('');
+          setResearchCollected(false);
+          setResearchStats(null);
+          
+        } else if (statusResponse.data.status === 'failed') {
+          // 실패한 경우
+          clearInterval(intervalId);
+          setError(statusResponse.data.error || '콘텐츠 생성 실패');
+          setGeneratingContent(false);
+          setLoading(false);
+        }
+        // 'running' 상태는 계속 폴링
         
       } catch (err) {
-        console.error('콘텐츠 생성 실패:', err);
-        
-        // 상세 오류 정보 로깅
-        if (err.response) {
-          console.error('오류 상태:', err.response.status);
-          console.error('오류 데이터:', err.response.data);
-          
-          // 서버에서 전달한 오류 메시지 사용
-          const errorMessage = err.response.data?.error || '콘텐츠 생성 중 오류가 발생했습니다.';
-          setError(errorMessage);
-        } else {
-          setError('콘텐츠 생성 중 오류가 발생했습니다.');
-        }
-        
-        // 네트워크 오류인 경우 재시도
-        if (!err.response && currentRetry < MAX_RETRIES) {
-          currentRetry++;
-          console.log(`콘텐츠 생성 재시도 중... (${currentRetry}/${MAX_RETRIES})`);
-          setError(`콘텐츠 생성 중 오류가 발생했습니다. 재시도 중... (${currentRetry}/${MAX_RETRIES})`);
-          
-          // 지수 백오프: 점점 더 길게 기다림
-          const retryDelay = 2000 * Math.pow(2, currentRetry - 1);
-          setTimeout(() => attemptContentGeneration(), retryDelay);
-          return;
-        }
-        
-        setGeneratingContent(false);
-        setLoading(false);
+        console.error('상태 확인 오류:', err);
+        // 오류가 있어도 폴링은 계속
+      }
+    }, 5000);
+    
+    setStatusCheckInterval(intervalId);
+  };
+  
+  // 컴포넌트 언마운트 시 인터벌 정리
+  useEffect(() => {
+    return () => {
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
       }
     };
-    
-    // 연구 자료가 이미 수집되었거나 새로 수집 완료된 경우, 콘텐츠 생성 진행
-    attemptContentGeneration();
-  };
+  }, [statusCheckInterval]);
 
   // 로컬 스토리지에서 콘텐츠 데이터 캐싱 복원
   useEffect(() => {

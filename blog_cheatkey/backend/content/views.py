@@ -1,3 +1,7 @@
+import threading
+import json
+import logging
+from django.core.cache import cache
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -6,6 +10,8 @@ from .models import BlogContent, MorphemeAnalysis
 from key_word.models import Keyword
 from .serializers import BlogContentSerializer, MorphemeAnalysisSerializer
 from .services.generator import ContentGenerator
+
+logger = logging.getLogger(__name__)
 
 class BlogContentViewSet(viewsets.ModelViewSet):
     serializer_class = BlogContentSerializer
@@ -31,48 +37,30 @@ class BlogContentViewSet(viewsets.ModelViewSet):
             # 키워드 존재 확인
             keyword = Keyword.objects.get(id=keyword_id)
             
-            # 이미 존재하는 콘텐츠 확인
-            existing_content = BlogContent.objects.filter(
+            # 백그라운드에서 콘텐츠 생성 시작
+            thread = threading.Thread(
+                target=self._generate_content_in_background,
+                args=(keyword_id, request.user.id, target_audience, business_info, custom_morphemes)
+            )
+            thread.daemon = True
+            thread.start()
+            
+            # 생성 작업이 시작됨을 알리는 임시 콘텐츠 생성
+            temp_content = BlogContent.objects.create(
                 user=request.user,
-                keyword=keyword
-            ).order_by('-created_at').first()
-            
-            # 최근 1시간 이내에 생성된 콘텐츠가 있으면 그대로 반환
-            if existing_content:
-                import time
-                from datetime import datetime, timedelta
-                
-                one_hour_ago = datetime.now() - timedelta(hours=1)
-                if existing_content.created_at > one_hour_ago:
-                    return Response({
-                        "message": "이미 생성된 콘텐츠가 있습니다.",
-                        "data": BlogContentSerializer(existing_content).data
-                    })
-            
-            # 콘텐츠 생성 서비스 초기화
-            generator = ContentGenerator()
-            
-            # 콘텐츠 생성 (custom_morphemes 추가)
-            content_id = generator.generate_content(
-                keyword_id=keyword_id,
-                user_id=request.user.id,
-                target_audience=target_audience,
-                business_info=business_info,
-                custom_morphemes=custom_morphemes
+                keyword=keyword,
+                title=f"{keyword.keyword} (생성 중...)",
+                content="콘텐츠가 생성 중입니다. 상태를 확인하려면 /status 엔드포인트를 사용하세요.",
+                is_optimized=False
             )
             
-            if content_id:
-                # 생성된 콘텐츠 가져오기
-                try:
-                    content = BlogContent.objects.get(id=content_id)
-                    return Response({
-                        "message": "콘텐츠가 성공적으로 생성되었습니다.",
-                        "data": BlogContentSerializer(content).data
-                    })
-                except BlogContent.DoesNotExist:
-                    return Response({"error": "생성된 콘텐츠를 찾을 수 없습니다."}, status=status.HTTP_404_NOT_FOUND)
-            else:
-                return Response({"error": "콘텐츠 생성에 실패했습니다."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            # 즉시 응답 반환
+            return Response({
+                "message": "콘텐츠 생성이 시작되었습니다. 상태를 확인하려면 /status/ 엔드포인트를 사용하세요.",
+                "keyword_id": keyword_id,
+                "temp_content_id": temp_content.id,
+                "status": "processing"
+            })
                 
         except Keyword.DoesNotExist:
             return Response({"error": "Invalid keyword_id"}, status=status.HTTP_404_NOT_FOUND)
@@ -81,11 +69,195 @@ class BlogContentViewSet(viewsets.ModelViewSet):
             print(traceback.format_exc())
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+    def _generate_content_in_background(self, keyword_id, user_id, target_audience, business_info, custom_morphemes):
+        """백그라운드에서 콘텐츠를 생성하는 메서드"""
+        try:
+            # 상태 업데이트 - 처리 중
+            cache_key = f"content_generation_{keyword_id}_{user_id}"
+            cache.set(cache_key, {"status": "running", "progress": 0}, timeout=3600)
+            
+            # 임시 콘텐츠 찾기
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = User.objects.get(id=user_id)
+            keyword = Keyword.objects.get(id=keyword_id)
+            temp_content = BlogContent.objects.filter(
+                user=user,
+                keyword=keyword,
+                title__contains="(생성 중...)"
+            ).order_by('-created_at').first()
+            
+            # 로깅 추가
+            logger.info(f"백그라운드 콘텐츠 생성 시작: keyword_id={keyword_id}, user_id={user_id}")
+            
+            # 콘텐츠 생성 - 중간 진행 상태 업데이트
+            cache.set(cache_key, {"status": "running", "progress": 25, "message": "연구 자료 수집 중..."}, timeout=3600)
+            
+            generator = ContentGenerator()
+            
+            # 상태 업데이트
+            cache.set(cache_key, {"status": "running", "progress": 50, "message": "AI가 콘텐츠 작성 중..."}, timeout=3600)
+            
+            content_id = generator.generate_content(
+                keyword_id=keyword_id,
+                user_id=user_id,
+                target_audience=target_audience,
+                business_info=business_info,
+                custom_morphemes=custom_morphemes
+            )
+            
+            # 상태 업데이트
+            cache.set(cache_key, {"status": "running", "progress": 75, "message": "콘텐츠 최적화 중..."}, timeout=3600)
+            
+            # 결과 캐싱
+            if content_id:
+                # 실제 콘텐츠가 생성됨 - 임시 콘텐츠 삭제
+                if temp_content and temp_content.id != content_id:
+                    temp_content.delete()
+                    
+                cache.set(
+                    cache_key, 
+                    {
+                        "status": "completed", 
+                        "progress": 100,
+                        "content_id": content_id,
+                        "message": "콘텐츠가 성공적으로 생성되었습니다."
+                    }, 
+                    timeout=3600
+                )
+                
+                # 로깅 추가
+                logger.info(f"백그라운드 콘텐츠 생성 완료: content_id={content_id}")
+            else:
+                # 생성 실패 - 임시 콘텐츠 업데이트
+                if temp_content:
+                    temp_content.content = "콘텐츠 생성에 실패했습니다. 다시 시도해주세요."
+                    temp_content.save()
+                    
+                cache.set(
+                    cache_key, 
+                    {
+                        "status": "failed", 
+                        "error": "콘텐츠 생성에 실패했습니다."
+                    }, 
+                    timeout=3600
+                )
+                
+                # 로깅 추가
+                logger.error(f"백그라운드 콘텐츠 생성 실패: keyword_id={keyword_id}, user_id={user_id}")
+                
+        except Exception as e:
+            # 오류 상태 저장
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(f"백그라운드 콘텐츠 생성 오류: {str(e)}")
+            logger.error(error_traceback)
+            
+            # 임시 콘텐츠 오류 메시지 업데이트
+            try:
+                if 'temp_content' in locals() and temp_content:
+                    temp_content.content = f"콘텐츠 생성 중 오류가 발생했습니다: {str(e)}"
+                    temp_content.save()
+            except:
+                pass
+                
+            cache.set(
+                cache_key, 
+                {
+                    "status": "failed", 
+                    "error": str(e)
+                }, 
+                timeout=3600
+            )
+    
+    @action(detail=False, methods=['get'])
+    def status(self, request):
+        """콘텐츠 생성 상태 확인 API"""
+        keyword_id = request.query_params.get('keyword_id')
+        
+        if not keyword_id:
+            return Response({"error": "keyword_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 캐시에서 상태 확인
+        cache_key = f"content_generation_{keyword_id}_{request.user.id}"
+        status_data = cache.get(cache_key)
+        
+        if not status_data:
+            # 상태 정보가 없으면 완료된 콘텐츠 확인
+            try:
+                content = BlogContent.objects.filter(
+                    keyword_id=keyword_id, 
+                    user=request.user,
+                    is_optimized=True  # 최적화까지 완료된 콘텐츠만
+                ).order_by('-created_at').first()
+                
+                if content:
+                    return Response({
+                        "status": "completed",
+                        "message": "콘텐츠가 이미 생성되어 있습니다.",
+                        "content_id": content.id,
+                        "data": BlogContentSerializer(content).data
+                    })
+                else:
+                    # 생성 중이지만 최적화는 안 된 콘텐츠 확인
+                    processing_content = BlogContent.objects.filter(
+                        keyword_id=keyword_id, 
+                        user=request.user,
+                        is_optimized=False
+                    ).order_by('-created_at').first()
+                    
+                    if processing_content:
+                        if "(생성 중...)" in processing_content.title:
+                            return Response({
+                                "status": "processing",
+                                "message": "콘텐츠 생성이 진행 중입니다.",
+                                "temp_content_id": processing_content.id
+                            })
+                        else:
+                            return Response({
+                                "status": "optimization_needed",
+                                "message": "콘텐츠 생성은 완료되었으나 최적화가 필요합니다.",
+                                "content_id": processing_content.id,
+                                "data": BlogContentSerializer(processing_content).data
+                            })
+                    else:
+                        return Response({
+                            "status": "not_started",
+                            "message": "콘텐츠 생성이 시작되지 않았습니다."
+                        })
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response(status_data)
+    
     @action(detail=True, methods=['post'])
     def optimize(self, request, pk=None):
+        """콘텐츠 최적화 API"""
         content = self.get_object()
         
+        # 백그라운드에서 최적화 시작
+        thread = threading.Thread(
+            target=self._optimize_content_in_background,
+            args=(content.pk,)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return Response({
+            "message": "콘텐츠 최적화가 시작되었습니다. 상태를 확인하려면 /optimize_status/ 엔드포인트를 사용하세요.",
+            "content_id": content.pk,
+            "status": "processing"
+        })
+    
+    def _optimize_content_in_background(self, content_id):
+        """백그라운드에서 콘텐츠를 최적화하는 메서드"""
         try:
+            # 상태 업데이트 - 처리 중
+            cache_key = f"content_optimization_{content_id}"
+            cache.set(cache_key, {"status": "running", "progress": 0}, timeout=3600)
+            
+            content = BlogContent.objects.get(id=content_id)
+            
             # 콘텐츠 생성 서비스 초기화
             generator = ContentGenerator()
             
@@ -137,17 +309,76 @@ class BlogContentViewSet(viewsets.ModelViewSet):
                             is_valid=info.get('is_valid', False)
                         )
                 
+                # 결과 캐싱
+                cache.set(
+                    cache_key, 
+                    {
+                        "status": "completed", 
+                        "message": "콘텐츠가 성공적으로 최적화되었습니다.",
+                        "content_id": content_id
+                    }, 
+                    timeout=3600
+                )
+            else:
+                # 이미 최적화된 콘텐츠
+                cache.set(
+                    cache_key, 
+                    {
+                        "status": "completed", 
+                        "message": "이미 최적화된 콘텐츠입니다.",
+                        "content_id": content_id
+                    }, 
+                    timeout=3600
+                )
+                
+        except Exception as e:
+            # 오류 상태 저장
+            import traceback
+            print(f"백그라운드 콘텐츠 최적화 오류: {str(e)}")
+            print(traceback.format_exc())
+            
+            cache.set(
+                cache_key, 
+                {
+                    "status": "failed", 
+                    "error": str(e)
+                }, 
+                timeout=3600
+            )
+    
+    @action(detail=True, methods=['get'])
+    def optimize_status(self, request, pk=None):
+        """콘텐츠 최적화 상태 확인 API"""
+        content = self.get_object()
+        
+        # 캐시에서 상태 확인
+        cache_key = f"content_optimization_{content.pk}"
+        status_data = cache.get(cache_key)
+        
+        if not status_data:
+            # 상태 정보가 없으면 콘텐츠 최적화 상태 직접 확인
+            if content.is_optimized:
                 return Response({
-                    "message": "콘텐츠가 성공적으로 최적화되었습니다.",
+                    "status": "completed",
+                    "message": "콘텐츠가 이미 최적화되어 있습니다.",
+                    "content_id": content.pk,
                     "data": BlogContentSerializer(content).data
                 })
             else:
-                return Response({"message": "이미 최적화된 콘텐츠입니다."})
-                
-        except Exception as e:
-            import traceback
-            print(traceback.format_exc())
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                return Response({
+                    "status": "not_started",
+                    "message": "콘텐츠 최적화가 시작되지 않았습니다.",
+                    "content_id": content.pk
+                })
+        
+        # 최적화가 완료된 경우 최신 데이터 반환
+        if status_data.get('status') == 'completed':
+            return Response({
+                **status_data,
+                "data": BlogContentSerializer(content).data
+            })
+        
+        return Response(status_data)
     
     @action(detail=True, methods=['get'])
     def mobile_format(self, request, pk=None):

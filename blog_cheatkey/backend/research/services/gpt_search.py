@@ -4,23 +4,24 @@ import logging
 import requests
 from datetime import datetime, timedelta
 from django.conf import settings
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
-class PerplexitySearchService:
+class GPTSearchService:
     """
-    Perplexity API를 사용한 웹 검색 서비스
-    OpenAI GPT 대신 Perplexity API를 사용
+    OpenAI의 GPT API를 사용한 웹 검색 서비스
+    기존 코드의 Perplexity, Serper, Tavily API 대신 GPT를 사용
     """
     
     def __init__(self):
-        self.api_key = settings.PERPLEXITY_API_KEY
-        self.base_url = "https://api.perplexity.ai/chat/completions"
-        self.model = "sonar-pro"  # Perplexity의 Sonar-Pro 모델 사용
+        self.api_key = settings.OPENAI_API_KEY
+        self.client = OpenAI(api_key=self.api_key)
+        self.model = "gpt-4o"  # 웹 브라우징 가능한 모델 사용
     
-    def search_with_perplexity(self, query, search_type='general', limit=3):
+    def search_with_gpt(self, query, search_type='general', limit=3):
         """
-        Perplexity를 사용하여 웹 검색 수행
+        GPT를 사용하여 웹 검색 수행
         
         Args:
             query (str): 검색 쿼리
@@ -72,34 +73,21 @@ class PerplexitySearchService:
                 {"role": "user", "content": f"'{query}'에 대해 검색해주세요. {search_type_text.get(search_type, '')} {format_instruction}"}
             ]
             
-            # API 요청 데이터
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "temperature": 0.2
-            }
-            
-            # 헤더 설정
-            headers = {
-                "accept": "application/json",
-                "content-type": "application/json",
-                "authorization": f"Bearer {self.api_key}"
-            }
-            
             # API 호출
-            response = requests.post(self.base_url, json=payload, headers=headers)
-            response.raise_for_status()  # 오류 발생시 예외 발생
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.2,  # 정확한 정보 검색을 위해 낮은 온도 사용
+                response_format={"type": "json_object"}
+            )
             
-            # 응답 처리
-            response_data = response.json()
-            content = response_data['choices'][0]['message']['content']
+            # 응답에서 JSON 추출
+            content = response.choices[0].message.content
             content = content.strip()
             
             # JSON 포맷 추출
             if "```json" in content:
                 json_content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                json_content = content.split("```")[1].strip()
             else:
                 json_content = content
                 
@@ -118,7 +106,7 @@ class PerplexitySearchService:
             return results
             
         except Exception as e:
-            logger.error(f"Perplexity 검색 서비스 오류: {str(e)}")
+            logger.error(f"GPT 검색 서비스 오류: {str(e)}")
             return []
     
     def extract_statistics(self, text):
@@ -188,9 +176,9 @@ class PerplexitySearchService:
         ]
         
         for query in base_queries:
-            news_results = self.search_with_perplexity(query, 'news', limit=1)
-            academic_results = self.search_with_perplexity(query, 'academic', limit=1)
-            stats_results = self.search_with_perplexity(query, 'statistics', limit=1)
+            news_results = self.search_with_gpt(query, 'news', limit=1)
+            academic_results = self.search_with_gpt(query, 'academic', limit=1)
+            stats_results = self.search_with_gpt(query, 'statistics', limit=1)
             
             all_results['news'].extend(news_results)
             all_results['academic'].extend(academic_results)
@@ -215,11 +203,11 @@ class PerplexitySearchService:
             
             # 소제목별로 적은 수의 결과만 가져와 전체 검색 횟수 최소화
             if len(all_results['news']) < limit_per_type:
-                news = self.search_with_perplexity(subtopic_query, 'news', limit=1)
+                news = self.search_with_gpt(subtopic_query, 'news', limit=1)
                 all_results['news'].extend(news)
                 
             if len(all_results['academic']) < limit_per_type:
-                academic = self.search_with_perplexity(subtopic_query, 'academic', limit=1)
+                academic = self.search_with_gpt(subtopic_query, 'academic', limit=1)
                 all_results['academic'].extend(academic)
         
         # 3. 중복 제거 및 정렬
@@ -247,3 +235,4 @@ class PerplexitySearchService:
             list: 중복 제거된 결과 목록
         """
         return list({result.get('url', ''): result for result in results if result.get('url')}.values())
+

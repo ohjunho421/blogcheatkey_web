@@ -44,7 +44,7 @@ class TitleGenerator:
         else:
             self.anthropic_api_key = settings.ANTHROPIC_API_KEY
             self.client = Anthropic(api_key=self.anthropic_api_key)
-            self.model = "claude-3-opus-20240229"  # Claude 최신 모델 사용
+            self.model = "claude-3-7-sonnet-20250219"  # Claude 최신 모델 사용
         
         # 재시도 설정
         self.max_retries = 3
