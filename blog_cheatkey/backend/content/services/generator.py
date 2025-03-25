@@ -31,7 +31,7 @@ class ContentGenerator:
         self.retry_delay = 2
         self.substitution_generator = SubstitutionGenerator()
     
-    def generate_content(self, keyword_id, user_id, target_audience=None, business_info=None, custom_morphemes=None):
+    def generate_content(self, keyword_id, user_id, target_audience=None, business_info=None, custom_morphemes=None, subtopics=None):
         """
         키워드 기반 블로그 콘텐츠 생성 (최적화 조건 충족)
         
@@ -41,6 +41,7 @@ class ContentGenerator:
             target_audience (dict): 타겟 독자 정보
             business_info (dict): 사업자 정보
             custom_morphemes (list): 사용자 지정 형태소 목록
+            subtopics (list): 명시적으로 전달된 소제목 목록 (기본값 None)
             
         Returns:
             int: 생성된 BlogContent 객체의 ID
@@ -50,7 +51,10 @@ class ContentGenerator:
                 # 키워드 및 관련 정보 가져오기
                 keyword = Keyword.objects.get(id=keyword_id)
                 user = User.objects.get(id=user_id)
-                subtopics = list(keyword.subtopics.order_by('order').values_list('title', flat=True))
+                
+                # 전달받은 소제목 사용, 없으면 DB에서 조회
+                if subtopics is None:
+                    subtopics = list(keyword.subtopics.order_by('order').values_list('title', flat=True))
                 
                 # 연구 자료 가져오기
                 news_sources = ResearchSource.objects.filter(keyword=keyword, source_type='news')
@@ -76,7 +80,7 @@ class ContentGenerator:
                 # 데이터 구성
                 data = {
                     "keyword": keyword.keyword,
-                    "subtopics": subtopics,
+                    "subtopics": subtopics,  # 여기서 전달받은 소제목 사용
                     "target_audience": target_audience or {
                         "primary": keyword.main_intent,
                         "pain_points": keyword.pain_points
@@ -96,7 +100,8 @@ class ContentGenerator:
                 
                 # 로깅 추가 - API 호출 시작 전
                 logger.info(f"콘텐츠 생성 API 호출 시작: 키워드={keyword.keyword}, 사용자={user.username}")
-                
+                logger.info(f"콘텐츠 생성에 사용되는 소제목: {subtopics}")
+
                 # 최적화 조건이 포함된 콘텐츠 생성 프롬프트 
                 prompt = self._create_optimized_content_prompt(data)
                 
@@ -211,7 +216,7 @@ class ContentGenerator:
                 raise e
         
         return None
-    
+                    
     def _verify_content_optimization(self, content, keyword, morphemes):
         """
         콘텐츠가 최적화 조건을 만족하는지 검증
@@ -365,6 +370,32 @@ class ContentGenerator:
         keyword = data["keyword"]
         morphemes = data.get("morphemes", self.okt.morphs(keyword))
         
+        # 2글자 미만 형태소 제외 (의미있는 형태소만 남김)
+        morphemes = [m for m in morphemes if len(m) >= 2]
+        
+        # 키워드 구성 요소 분석 (복합 키워드인 경우)
+        is_compound_keyword = ' ' in keyword
+        keyword_parts = []
+        if is_compound_keyword:
+            keyword_parts = [part for part in keyword.split() if len(part) >= 2]
+        
+        # 복합 키워드 처리 지침 생성
+        keyword_instruction = ""
+        if is_compound_keyword and keyword_parts:
+            # 복합 키워드 경우의 특별 지침
+            keyword_instruction = f"""
+            이 글에서는 복합 키워드 '{keyword}'를 다룹니다. 이 키워드와 그 구성 요소({', '.join(keyword_parts)})의 출현 횟수를 정확히 관리해야 합니다.
+            
+            - '{keyword}' 전체 키워드는 정확히 17-20회 사용하세요.
+            - 구성 요소인 {', '.join(keyword_parts)} 각각도 정확히 17-20회 사용되어야 합니다.
+            - 주의: 구성 요소가 복합 키워드 안에 이미 포함될 경우를 고려하여, 복합 키워드가 아닌 형태로 구성 요소를 사용할 때는 아래 패턴을 따르세요:
+            * 복합 키워드 '{keyword}'를 X회 사용했다면
+            * 각 구성 요소는 (17-X)회에서 (20-X)회만큼 추가로 단독 사용하세요
+            * 예: '{keyword}'를 18회 사용했다면, '{keyword_parts[0]}'는 -1~2회, '{keyword_parts[1] if len(keyword_parts) > 1 else keyword_parts[0]}'는 -1~2회 추가 사용
+            
+            이렇게 하면 Ctrl+F로 검색했을 때 각 단어가 정확히 17-20회 나오게 됩니다.
+            """
+        
         # 안전한 데이터 가져오기
         target_audience = data.get('target_audience', {})
         business_info = data.get('business_info', {})
@@ -398,26 +429,28 @@ class ContentGenerator:
             for stat in research_data['statistics']:
                 statistics_text += f"- {stat['context']} (출처: {stat['source_title']})\n"
 
-        # 최적화 조건 섹션 추가
+        # 최적화 조건 섹션
         optimization_requirements = f"""
         ⚠️ 중요: 다음 최적화 조건을 반드시 준수해야 합니다.
         
         1. 글자수 조건: 정확히 1700-2000자 (공백 제외, 참고자료 섹션 제외)
-           - 완성 후 Ctrl+F로 검색하여 글자수 확인
-           - 내용을 간결하게 유지하거나 필요시 확장하여 이 범위에 맞추기
+        - 완성 후 Ctrl+F로 검색하여 글자수 확인
+        - 내용을 간결하게 유지하거나 필요시 확장하여 이 범위에 맞추기
         
         2. 키워드 및 형태소 출현 횟수 조건:
-           - 주 키워드 '{keyword}': 정확히 17-20회 사용
-           - 각 형태소({', '.join(morphemes)}): 정확히 17-20회 사용
-           - 완성 후 Ctrl+F로 검색하여 각 키워드와 형태소의 출현 횟수 확인
+        {keyword_instruction if is_compound_keyword else f"   - 주 키워드 '{keyword}': 정확히 17-20회 사용"}
+        - 기타 형태소({', '.join([m for m in morphemes if m not in keyword_parts and m != keyword])}): 정확히 17-20회 사용
+        - 중요: Ctrl+F로 검색했을 때 모든 키워드와 형태소가 17-20회 범위 내에 있어야 합니다!
         
-        3. 키워드 및 형태소 최적화 방법:
-           - 지시어 활용: "{keyword}는" → "이것은"
-           - 자연스러운 생략: 문맥상 이해 가능한 경우 생략
-           - 동의어/유사어 대체: 과다 사용된 단어를 적절한 동의어로 대체
+        3. 키워드 최적화 방법:
+        - 지시어 활용: "{keyword}는" → "이것은"
+        - 자연스러운 생략: 문맥상 이해 가능한 경우 생략
+        - 동의어/유사어 대체: 과다 사용된 단어를 적절한 동의어로 대체
         
-        ✓ 최종 검증: 생성 완료 후 모든 키워드와 형태소가 정확히 17-20회 범위 내에서 사용되었는지 확인하세요.
+        ✓ 최종 검증: 생성 완료 후 Ctrl+F로 검색하여 모든 키워드와 형태소가 정확히 17-20회 범위 내에 있는지 꼭 확인하세요.
         """
+        logger.info(f"프롬프트에 전달되는 소제목: {data.get('subtopics', [])}")
+
 
         prompt = f"""
         다음 조건들을 준수하여 전문성과 친근함이 조화된, 읽기 쉽고 실용적인 블로그 글을 작성해주세요:

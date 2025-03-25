@@ -1484,9 +1484,10 @@ class ContentOptimizer:
         
         # 키워드 자체를 하나의 형태소로 추가
         morpheme_counts = {}
+        keyword_count = count_exact_word(keyword, content)
         morpheme_counts[keyword] = {
-            'count': count_exact_word(keyword, content),
-            'is_valid': 17 <= count_exact_word(keyword, content) <= 20
+            'count': keyword_count,
+            'is_valid': 17 <= keyword_count <= 20
         }
         
         # 키워드에서 형태소 추출
@@ -1495,24 +1496,33 @@ class ContentOptimizer:
         # 2글자 이상의 의미 있는 형태소만 필터링
         significant_morphemes = [m for m in keyword_morphemes if len(m) >= 2]
         
-        # 키워드의 일부분도 형태소로 고려 (예: "자동차냉각수"에서 "자동차", "냉각수")
-        if len(keyword) >= 4:
-            for i in range(2, len(keyword) - 1):
-                # 앞부분 검사
-                prefix = keyword[:i]
-                if len(prefix) >= 2:
-                    significant_morphemes.append(prefix)
+        # 복합 키워드 처리 (예: "자동차 부동액")
+        is_compound_keyword = ' ' in keyword
+        keyword_parts = []
+        if is_compound_keyword:
+            keyword_parts = [part for part in keyword.split() if len(part) >= 2]
+            
+            # 복합 키워드 구성 요소의 출현 횟수 분석
+            for part in keyword_parts:
+                # 구성 요소의 출현 횟수 계산
+                part_count = count_exact_word(part, content)
                 
-                # 뒷부분 검사
-                suffix = keyword[i:]
-                if len(suffix) >= 2:
-                    significant_morphemes.append(suffix)
+                # 복합 키워드에서의 포함 횟수를 고려
+                # 키워드가 X번 사용되면, 각 구성 요소는 이미 X번 포함되어 있음
+                # 총 출현 횟수 = 단독 출현 + 복합 키워드 내 출현
+                total_count = part_count
+                
+                morpheme_counts[part] = {
+                    'count': total_count,
+                    'is_valid': 17 <= total_count <= 20
+                }
         
-        # 중복 제거
-        significant_morphemes = list(set(significant_morphemes))
-        
-        # 각 형태소별 출현 횟수 계산
+        # 나머지 키워드의 일부분도 형태소로 고려
         for morpheme in significant_morphemes:
+            # 이미 처리된 복합 키워드 구성 요소는 건너뜀
+            if morpheme in keyword_parts or morpheme == keyword:
+                continue
+                
             count = count_exact_word(morpheme, content)
             is_valid = 17 <= count <= 20
             
@@ -1527,6 +1537,7 @@ class ContentOptimizer:
         # 분석 결과 구성
         morpheme_analysis = {
             'keyword': keyword,
+            'is_compound': is_compound_keyword,
             'morpheme_analysis': morpheme_counts
         }
         

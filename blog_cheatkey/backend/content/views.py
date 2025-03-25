@@ -81,6 +81,11 @@ class BlogContentViewSet(viewsets.ModelViewSet):
             User = get_user_model()
             user = User.objects.get(id=user_id)
             keyword = Keyword.objects.get(id=keyword_id)
+            
+            # 중요: 사용자가 수정한 최신 소제목 정보 가져오기
+            subtopics = list(keyword.subtopics.order_by('order').values_list('title', flat=True))
+            logger.info(f"콘텐츠 생성에 사용될 소제목: {subtopics}")
+            
             temp_content = BlogContent.objects.filter(
                 user=user,
                 keyword=keyword,
@@ -98,12 +103,14 @@ class BlogContentViewSet(viewsets.ModelViewSet):
             # 상태 업데이트
             cache.set(cache_key, {"status": "running", "progress": 50, "message": "AI가 콘텐츠 작성 중..."}, timeout=3600)
             
+            # 여기서 명시적으로 subtopics를 전달
             content_id = generator.generate_content(
                 keyword_id=keyword_id,
                 user_id=user_id,
                 target_audience=target_audience,
                 business_info=business_info,
-                custom_morphemes=custom_morphemes
+                custom_morphemes=custom_morphemes,
+                subtopics=subtopics
             )
             
             # 상태 업데이트

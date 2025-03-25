@@ -6,16 +6,17 @@ const KeywordManagement = () => {
   const [keywords, setKeywords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [newKeyword, setNewKeyword] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [editingSubtopic, setEditingSubtopic] = useState({ keywordId: null, index: null, value: '' });
   
-  // 키워드 타겟 정보 편집 상태
-  const [editingTargetInfo, setEditingTargetInfo] = useState({ keywordId: null, field: null });
-  const [editValue, setEditValue] = useState('');
-  const [editingPainPoints, setEditingPainPoints] = useState([]);
-  const [editingInfoNeeded, setEditingInfoNeeded] = useState([]);
-  const [updateMessage, setUpdateMessage] = useState('');
+  //키워드 타겟 정보 편집 상태
+  //const [editingTargetInfo, setEditingTargetInfo] = useState({ keywordId: null, field: null });
+  //const [editValue, setEditValue] = useState('');
+  //const [editingPainPoints, setEditingPainPoints] = useState([]);
+  //const [editingInfoNeeded, setEditingInfoNeeded] = useState([]);
+  //const [updateMessage, setUpdateMessage] = useState('');
 
   // 키워드 목록 로드
   useEffect(() => {
@@ -175,12 +176,12 @@ const KeywordManagement = () => {
       const updatedSubtopics = [...keyword.subtopics];
       updatedSubtopics[editingSubtopic.index] = editingSubtopic.value;
       
-      // API 호출 (소제목 업데이트)
-      await keywordService.updateKeyword(keywordId, {
-        keyword: keyword.keyword,  // 다른 필수 필드들 포함
-        main_intent: keyword.main_intent,
-        subtopics: updatedSubtopics
-      });
+      console.log('저장 중인 소제목:', updatedSubtopics); // 소제목 데이터 로깅
+      
+      // 일반 updateKeyword 대신 updateSubtopics 호출
+      const response = await keywordService.updateSubtopics(keywordId, updatedSubtopics);
+      
+      console.log('API 응답:', response.data); // 응답 로깅
       
       // 로컬 상태 업데이트
       const updatedKeywords = keywords.map(k => {
@@ -192,9 +193,16 @@ const KeywordManagement = () => {
       
       setKeywords(updatedKeywords);
       setEditingSubtopic({ keywordId: null, index: null, value: '' });
+      
+      // 성공 메시지 추가
+      setSuccess('소제목이 성공적으로 저장되었습니다. 이 소제목으로 콘텐츠가 생성됩니다.');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
+      console.error('소제목 업데이트 오류:', err);
+      if (err.response) {
+        console.error('오류 응답:', err.response.data);
+      }
       setError('소제목 업데이트 중 오류가 발생했습니다.');
-      console.error(err);
     }
   };
 
@@ -204,6 +212,9 @@ const KeywordManagement = () => {
       
       {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4">{error}</div>}
       
+      {/* 성공 메시지 추가 */}
+      {success && <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-4">{success}</div>}
+
       <div className="bg-white rounded-lg shadow p-4 mb-8">
         <h2 className="text-lg font-semibold mb-2">새 키워드 추가</h2>
         <form onSubmit={handleAddKeyword} className="flex gap-2">

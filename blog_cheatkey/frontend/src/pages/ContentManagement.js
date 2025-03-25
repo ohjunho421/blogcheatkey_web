@@ -19,17 +19,14 @@ function ContentManagement() {
   const [generatingContent, setGeneratingContent] = useState(false);
   const [networkStatus, setNetworkStatus] = useState(navigator.onLine);
   const [retryCount, setRetryCount] = useState(0);
-  // 추가된 상태 변수 - 상태 폴링을 위한 인터벌
   const [statusCheckInterval, setStatusCheckInterval] = useState(null);
-  
-  // 연구 자료 수집 상태를 관리하는 state
   const [collectingResearch, setCollectingResearch] = useState(false);
   const [researchCollected, setResearchCollected] = useState(false);
   const [researchStats, setResearchStats] = useState(null);
   const [processingStep, setProcessingStep] = useState('');
-  
   const navigate = useNavigate();
 
+  
   // 네트워크 상태 모니터링
   useEffect(() => {
     const handleOnline = () => {
@@ -231,8 +228,41 @@ function ContentManagement() {
     }
   };
 
+  // 콘텐츠 생성 전 소제목 확인 기능 추가
+  const confirmSubtopics = async () => {
+    if (!selectedKeyword) {
+      setError('키워드를 선택해주세요.');
+      return false;
+    }
+    
+    try {
+      // 선택된 키워드의 소제목 정보 가져오기
+      const keywordDetail = await keywordService.getKeyword(selectedKeyword);
+      const subtopics = keywordDetail.data.subtopics || [];
+      
+      // 소제목이 없는 경우
+      if (subtopics.length === 0) {
+        const confirm = window.confirm('이 키워드에는 소제목이 없습니다. 계속 진행하시겠습니까?');
+        return confirm;
+      }
+      
+      // 소제목 목록 표시 및 확인
+      const subtopicsList = subtopics.map((st, idx) => `${idx+1}. ${st.title || st}`).join('\n');
+      const confirmMsg = `다음 소제목을 기준으로 콘텐츠를 생성합니다:\n\n${subtopicsList}\n\n계속 진행하시겠습니까?`;
+      
+      return window.confirm(confirmMsg);
+    } catch (err) {
+      console.error('소제목 확인 중 오류:', err);
+      return false;
+    }
+  };
+
   // 콘텐츠 생성 함수 - 새로운 백그라운드 처리 방식으로 수정
   const handleContentGeneration = async () => {
+    // 소제목 확인 요청
+    const confirmed = await confirmSubtopics();
+    if (!confirmed) return;
+
     if (!selectedKeyword) {
       setError('키워드를 선택해주세요.');
       return;

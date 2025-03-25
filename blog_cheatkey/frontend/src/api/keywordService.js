@@ -94,6 +94,11 @@ export const keywordService = {
     { maxRetries: 2, retryDelay: 1000, timeout: 30000 }
   ),
   
+  updateSubtopics: (id, subtopics) => requestWithRetry(
+    (config) => client.post(`/key-word/${id}/update_subtopics/`, { subtopics }, config),
+    { maxRetries: 2, retryDelay: 1000, timeout: 30000 }
+  ),
+
   // 키워드 삭제
   deleteKeyword: (id) => requestWithRetry(
     (config) => client.delete(`/key-word/${id}/`, config),  // key_word/ -> key-word/
