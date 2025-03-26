@@ -15,8 +15,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # 보안 및 디버그 설정
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-your-secret-key-here')
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
+DEBUG = False
+ALLOWED_HOSTS = ['your-environment-name.elasticbeanstalk.com', '.amazonaws.com', 'localhost', '127.0.0.1', '*']
 
 # 커스텀 사용자 모델 설정: 앱 내부에서 기본 라벨은 "accounts" (AppConfig가 따로 지정되지 않았다면)
 AUTH_USER_MODEL = 'accounts.User'
@@ -182,8 +182,9 @@ if DEBUG:
 
 # 정적 파일 설정
 STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'frontend/build/static'),  # React 빌드 정적 파일 경로
+    os.path.join(BASE_DIR, 'staticfiles'),  # 기본 정적 파일 폴더
 ]
 
 # CSRF 설정

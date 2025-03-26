@@ -6,7 +6,7 @@ def main():
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
     
     # 설정 모듈 경로 변경
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'blog_cheatkey.settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.blog_cheatkey.settings')
     # 또는 
     # os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.blog_cheatkey.settings')
     

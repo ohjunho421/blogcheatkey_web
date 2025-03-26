@@ -1,0 +1,1 @@
+from blog_cheatkey.backend.blog_cheatkey.wsgi import application
