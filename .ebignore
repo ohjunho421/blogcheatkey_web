@@ -1,0 +1,30 @@
+# 가상 환경
+venv/
+blogvenv/
+env/
+.env
+
+# 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 데이터베이스
+db.sqlite3
+
+# 로그 파일
+*.log
+
+# 로컬 설정
+.DS_Store
+.idea/
+.vscode/
+
+# Git 관련
+.git/
+.gitignore
+
+# 기타 불필요한 파일
+node_modules/

@@ -4,35 +4,52 @@ import jwt
 from pathlib import Path
 from dotenv import load_dotenv
 
-# backend 폴더를 파이썬 경로에 추가하여, 앱들을 간단한 라벨로 사용할 수 있게 함
+# 로컬 환경에서 .env 파일 로드 시도
+try:
+    load_dotenv()
+except ImportError:
+    pass
+
+# backend 폴더를 파이썬 경로에 추가
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
 
-# .env 파일 로드
-load_dotenv()
-
-# BASE_DIR 설정: 프로젝트의 루트 경로 (manage.py가 위치한 폴더의 부모)
+# BASE_DIR 설정
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # 보안 및 디버그 설정
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-your-secret-key-here')
-DEBUG = False
-ALLOWED_HOSTS = ['your-environment-name.elasticbeanstalk.com', '.amazonaws.com', 'localhost', '127.0.0.1', '*']
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '*,.elasticbeanstalk.com').split(',')
 
-# 커스텀 사용자 모델 설정: 앱 내부에서 기본 라벨은 "accounts" (AppConfig가 따로 지정되지 않았다면)
+# 커스텀 사용자 모델 설정
 AUTH_USER_MODEL = 'accounts.User'
 
 # 프론트엔드 URL 설정
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
 
-# 데이터베이스 설정 (SQLite 예시)
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# 데이터베이스 설정 - PostgreSQL
+if 'RDS_HOSTNAME' in os.environ:
+    # Elastic Beanstalk RDS 환경
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ['RDS_DB_NAME'],
+            'USER': os.environ['RDS_USERNAME'],
+            'PASSWORD': os.environ['RDS_PASSWORD'],
+            'HOST': os.environ['RDS_HOSTNAME'],
+            'PORT': os.environ['RDS_PORT'],
+        }
     }
-}
+else:
+    # 로컬 개발 환경
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+        }
+    }
 
-# 캐시 설정 추가
+# 캐시 설정
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
@@ -40,11 +57,10 @@ CACHES = {
     }
 }
 
-# API 키 설정 (필요에 따라 .env 파일에 설정)
+# API 키 설정
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY','')
-
 
 # Application definition
 INSTALLED_APPS = [
@@ -68,7 +84,7 @@ INSTALLED_APPS = [
     'allauth.socialaccount.providers.kakao',
     'allauth.socialaccount.providers.naver',
 
-    # 프로젝트 앱 (backend 폴더 하위에 위치한 앱들; 폴더 이름이 앱 라벨로 사용됨)
+    # 프로젝트 앱
     'accounts',
     'core',
     'key_word',
@@ -79,7 +95,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # CORS 미들웨어
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -87,7 +103,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'allauth.account.middleware.AccountMiddleware',  # allauth 관련 미들웨어
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
 ROOT_URLCONF = 'blog_cheatkey.urls'
@@ -108,7 +124,7 @@ TEMPLATES = [
     },
 ]
 
-# django-allauth 관련 설정 추가
+# django-allauth 관련 설정
 SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
@@ -150,10 +166,7 @@ SOCIALACCOUNT_PROVIDERS = {
     }
 }
 
-# 로그인 성공 후 리디렉션 URL
 LOGIN_REDIRECT_URL = '/'
-
-# 소셜 계정 로그인 후 사용자 정보를 자동으로 업데이트
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_EMAIL_VERIFICATION = 'none'
 
@@ -176,31 +189,23 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 CORS_ALLOW_CREDENTIALS = True
 
-# 개발 환경에서만 모든 출처 허용
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 
 # 정적 파일 설정
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static')
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'staticfiles'),  # 기본 정적 파일 폴더
-]
-
-# CSRF 설정
-CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
-CSRF_COOKIE_SAMESITE = 'Lax'  # 또는 'None' (하지만 'None'인 경우 SECURE_COOKIE가 True여야 함)
-CSRF_COOKIE_HTTPONLY = False  # JavaScript에서 접근 가능하도록 설정
-CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False') == 'True'  # HTTPS 사용 시 True로 설정
 
 # 미디어 파일 설정
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# CSRF 설정
+CSRF_TRUSTED_ORIGINS = os.environ.get('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False') == 'True'
+
+# 파일 업로드 설정
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
-DEFAULT_TIMEOUT = 300  # 5분 (300초)
-
-if DEBUG:
-    print(f"MEDIA_ROOT 경로: {MEDIA_ROOT}")
-    print(f"MEDIA_URL: {MEDIA_URL}")

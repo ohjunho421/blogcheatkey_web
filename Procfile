@@ -1,1 +1,1 @@
-web: gunicorn application:application
+web: gunicorn blog_cheatkey.backend.blog_cheatkey.wsgi:application
