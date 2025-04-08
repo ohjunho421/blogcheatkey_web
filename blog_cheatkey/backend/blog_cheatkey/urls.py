@@ -1,7 +1,7 @@
-# urls.py
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, include, re_path
 from rest_framework.authtoken.views import obtain_auth_token
+from django.views.decorators.cache import never_cache
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.conf.urls.static import static
@@ -9,7 +9,7 @@ from core.views import (
     generate_images_for_content,
     generate_infographic,
     get_generated_images,
-)  # 이 부분 추가
+)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -51,11 +51,17 @@ urlpatterns = [
         ),
     ),
     # React 앱의 모든 경로를 처리하는 catch-all 뷰 (관리자 페이지를 제외한 모든 경로)
-    path("", TemplateView.as_view(template_name="index.html"), name="index"),
-    path(
-        "<path:path>",
-        TemplateView.as_view(template_name="index.html"),
-        name="catch-all",
+    # path("", TemplateView.as_view(template_name="index.html"), name="index"),
+    # path(
+    #     "<path:path>",
+    #     TemplateView.as_view(template_name="index.html"),
+    #     name="catch-all",
+    # ),
+    # React 앱의 모든 경로 처리 catch-all 뷰 (SPA 지원용)
+    re_path(
+        r"^.*$",
+        never_cache(TemplateView.as_view(template_name="index.html")),
+        name="spa-entry",
     ),
 ]
 

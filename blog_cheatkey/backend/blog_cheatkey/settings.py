@@ -109,7 +109,7 @@ ROOT_URLCONF = "backend.blog_cheatkey.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [os.path.join(BASE_DIR, "frontend/build")],
+        "DIRS": [os.path.join(BASE_DIR, "static")],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -194,8 +194,8 @@ if DEBUG:
 
 # 정적 파일 설정
 STATIC_URL = "/static/"
-STATICFILES_DIRS = [os.path.join(BASE_DIR, "frontend", "build", "static")]
-STATIC_ROOT = os.path.join(BASE_DIR, "static")  # collectstatic 결과 저장 위치
+STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")  # collectstatic 결과 저장 위치
 
 # 미디어 파일 설정
 MEDIA_URL = "/media/"
