@@ -1,15 +1,16 @@
 import os
 import sys
 
+
 def main():
     # 경로에 backend 디렉토리 추가
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
-    
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
+
     # 설정 모듈 경로 변경
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.blog_cheatkey.settings')
-    # 또는 
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "blog_cheatkey.settings")
+    # 또는
     # os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.blog_cheatkey.settings')
-    
+
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
@@ -20,5 +21,6 @@ def main():
         ) from exc
     execute_from_command_line(sys.argv)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
