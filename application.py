@@ -5,12 +5,10 @@ import sys
 base_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Python 경로 설정
-sys.path.insert(0, base_dir)
+sys.path.insert(0, os.path.join(base_dir, "blog_cheatkey", "backend"))
 
 # Django 설정
-os.environ.setdefault(
-    "DJANGO_SETTINGS_MODULE", "blog_cheatkey.backend.blog_cheatkey.settings"
-)
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "blog_cheatkey.settings")
 
 # WSGI 애플리케이션 가져오기
 try:
