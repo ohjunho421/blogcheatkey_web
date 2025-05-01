@@ -17,7 +17,7 @@ const Dashboard = () => {
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4">빠른 시작하기</h2>
           <div className="space-y-4">
-            <Link to="/keywords/create" className="block p-4 bg-blue-50 hover:bg-blue-100 rounded-lg">
+            <Link to="/keywords" className="block p-4 bg-blue-50 hover:bg-blue-100 rounded-lg">
               <h3 className="font-medium text-blue-600">새 키워드 분석하기</h3>
               <p className="text-sm text-gray-600 mt-1">키워드를 입력하여 SEO 분석을 시작하세요.</p>
             </Link>
