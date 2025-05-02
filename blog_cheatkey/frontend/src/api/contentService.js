@@ -76,6 +76,12 @@ export const contentService = {
     { maxRetries: 5, retryDelay: 1000, timeout: 20000 }
   ),
   
+  // 새로운 진행 상태 추적 메서드 추가
+  getGeneratorStatus: (keywordId) => requestWithRetry(
+    (config) => client.get(`/content/generator_status/?keyword_id=${keywordId}`, config),
+    { maxRetries: 5, retryDelay: 1000, timeout: 10000 }
+  ),
+  
   // 콘텐츠 최적화 상태 확인 메서드 추가
   getOptimizationStatus: (contentId) => requestWithRetry(
     (config) => client.get(`/content/${contentId}/optimize_status/`, config),

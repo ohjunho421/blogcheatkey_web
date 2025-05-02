@@ -1,12 +1,16 @@
 // src/pages/ContentManagement.js
 import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
 import { contentService } from '../api/contentService';
 import { keywordService } from '../api/keywordService';
-import { researchService } from '../api/researchService'; // 추가된 import
+import { researchService } from '../api/researchService';
 import { useNavigate } from 'react-router-dom';
 import BusinessInfoSelector from './BusinessInfoSelector';
 
 function ContentManagement() {
+  const navigate = useNavigate();
+  
+  // 상태 관리
   const [contents, setContents] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [selectedKeyword, setSelectedKeyword] = useState('');
@@ -24,7 +28,11 @@ function ContentManagement() {
   const [researchCollected, setResearchCollected] = useState(false);
   const [researchStats, setResearchStats] = useState(null);
   const [processingStep, setProcessingStep] = useState('');
-  const navigate = useNavigate();
+  // 진행 상태 추적을 위한 상태 추가
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [generationStatus, setGenerationStatus] = useState(null);
+  const [generationMessage, setGenerationMessage] = useState('');
+  const [hasNavigated, setHasNavigated] = useState(false);
 
   
   // 네트워크 상태 모니터링
@@ -134,6 +142,54 @@ function ContentManagement() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // 페이지 로드시 대기 시간 설정
+  useEffect(() => {
+    // 0.5초 대기 후 로딩 완료 처리
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 500);
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  // 콘텐츠 생성 완료 처리 함수
+  const handleContentCompletion = (statusData, interval) => {
+    // 페이지 이동 플래그 설정
+    setHasNavigated(true);
+    
+    // 로그와 상태 갱신
+    console.log('콘텐츠 생성 100% 완료 - 폴링 중지');
+    clearInterval(interval);
+    setStatusCheckInterval(null);
+    setGeneratingContent(false);
+    
+    // 콘텐츠 ID 가져오기
+    const contentId = statusData.content_id || 
+                    statusData.id || 
+                    (statusData.result && statusData.result.id) || 
+                    (statusData.data && statusData.data.content_id);
+    
+    // 사용자에게 완료 메시지 표시
+    setGenerationMessage('콘텐츠 생성이 완료되었습니다. 잠시 후 자동으로 이동합니다...');
+    
+    if (contentId) {
+      console.log('콘텐츠 ID 감지:', contentId, '- 페이지 이동 필요');
+      
+      // 상태에 contentId 저장
+      setGenerationStatus(prev => ({
+        ...prev,
+        content_id: contentId
+      }));
+      
+      // 네트워크 오류 방지를 위해 직접 이동 사용 - broken pipe 해결
+      // 로딩바가 100% 되었음을 보여주기 위해 2초 대기
+      setTimeout(() => {
+        console.log('새창으로 페이지 이동 실행');
+        window.location.href = `/content/${contentId}`;
+      }, 2000);
+    }
+  };
 
   function handleKeywordChange(e) {
     setSelectedKeyword(e.target.value);
@@ -288,6 +344,8 @@ function ContentManagement() {
       setGeneratingContent(true);
       setProcessingStep('content');
       setError(null);
+      setGenerationProgress(0);
+      setGenerationMessage('콘텐츠 생성 준비 중...');
       
       // 형태소 처리
       const morphemesArray = customMorphemes.trim() 
@@ -297,7 +355,6 @@ function ContentManagement() {
       // 백엔드가 예상하는 정확한 데이터 형식으로 요청
       const requestData = {
         keyword_id: selectedKeyword,
-        target_audience: {},
         business_info: {
           name: businessName,
           expertise: expertise
@@ -311,8 +368,48 @@ function ContentManagement() {
       const response = await contentService.createContent(requestData);
       console.log('콘텐츠 생성 응답:', response.data);
       
-      // 상태 폴링 시작
-      startStatusPolling(selectedKeyword);
+      // 상태 ID 가져오기 - 다양한 형태의 응답 처리
+      // ID를 추출하는데 문자열 값이 아닌 숫자만 사용
+      let statusId = null;
+      
+      // 가능한 ID 필드들
+      const possibleIdFields = [
+        response.data.status_id,
+        response.data.id,
+        response.data.content_id,
+        response.data.process_id,
+        response.data.result?.id,
+        response.data.data?.id
+      ];
+      
+      // 첫 번째 유효한 숫자 ID 사용
+      for (const field of possibleIdFields) {
+        if (field !== undefined && field !== null && !isNaN(Number(field))) {
+          statusId = field;
+          break;
+        }
+      }
+      
+      // 유효한 ID가 없으면 최종적으로 키워드 ID 사용 (숫자만 사용)
+      if (statusId === null) {
+        // 키워드 ID가 유효한 숫자인지 확인
+        if (!isNaN(Number(selectedKeyword))) {
+          statusId = selectedKeyword;
+          console.log('응답에서 ID를 찾을 수 없어 키워드 ID 사용:', statusId);
+        } else {
+          // 유효한 ID가 없으면 오류 처리
+          throw new Error('유효한 상태 ID를 찾을 수 없습니다');
+        }
+      }
+      
+      console.log('추출된 상태 ID:', statusId);
+      
+      if (statusId) {
+        // 상태 폴링 시작
+        startStatusPolling(statusId);
+      } else {
+        throw new Error('상태 ID를 찾을 수 없습니다');
+      }
       
     } catch (err) {
       console.error('콘텐츠 생성 실패:', err);
@@ -322,55 +419,134 @@ function ContentManagement() {
     }
   };
   
-  // 상태 폴링 함수 추가
-  const startStatusPolling = (keywordId) => {
-    // 이전 인터벌 정리
+  // 오류 발생 횟수 추적을 위한 상태
+  const [errorCount, setErrorCount] = useState(0);
+
+  // 상태 폴링 함수 - 상태 ID를 받아 상태를 확인하고 페이지 이동 처리
+  const startStatusPolling = (statusId) => {
+    console.log('상태 폴링 시작. 상태 ID:', statusId);
+    
+    // 기존 인터벌이 있으면 제거
     if (statusCheckInterval) {
       clearInterval(statusCheckInterval);
+      setStatusCheckInterval(null);
     }
     
-    // 5초마다 상태 확인
-    const intervalId = setInterval(async () => {
-      try {
-        const statusResponse = await contentService.getContentGenerationStatus(keywordId);
-        console.log('상태 확인 응답:', statusResponse.data);
-        
-        // 상태에 따라 처리
-        if (statusResponse.data.status === 'completed') {
-          // 완료된 경우
-          clearInterval(intervalId);
-          
-          // 완료 처리
-          setGeneratingContent(false);
-          setLoading(false);
-          
-          // 전체 콘텐츠 목록 새로고침
-          loadData();
-          
-          // 입력 필드 초기화
-          setSelectedKeyword('');
-          setBusinessName('');
-          setExpertise('');
-          setCustomMorphemes('');
-          setResearchCollected(false);
-          setResearchStats(null);
-          
-        } else if (statusResponse.data.status === 'failed') {
-          // 실패한 경우
-          clearInterval(intervalId);
-          setError(statusResponse.data.error || '콘텐츠 생성 실패');
-          setGeneratingContent(false);
-          setLoading(false);
-        }
-        // 'running' 상태는 계속 폴링
-        
-      } catch (err) {
-        console.error('상태 확인 오류:', err);
-        // 오류가 있어도 폴링은 계속
-      }
-    }, 5000);
+    // 오류 카운트 초기화
+    setErrorCount(0);
     
-    setStatusCheckInterval(intervalId);
+    // 상태 확인을 위한 새 인터벌 생성
+    const newInterval = setInterval(async () => {
+      // 인터벌 변수 상태에 저장
+      setStatusCheckInterval(newInterval);
+      
+      try {
+        // 현재 이미 다른 페이지로 이동 중인지 확인
+        if (hasNavigated) {
+          console.log('이미 이동 중이므로 폴링 중지');
+          clearInterval(newInterval);
+          setStatusCheckInterval(null);
+          return;
+        }
+        
+        // 상태 정보 요청
+        const statusResponse = await contentService.getContentGenerationStatus(statusId);
+        const statusData = statusResponse.data;
+        
+        // 로그 추가
+        console.log('상태 업데이트:', statusData);
+        
+        // 상태 업데이트
+        setGenerationStatus(statusData);
+        
+        // 진행률 업데이트
+        const progress = statusData.progress || 0;
+        setGenerationProgress(progress);
+        
+        // 메시지 업데이트
+        try {
+          if (statusData.message) {
+            setGenerationMessage(statusData.message);
+          }
+        } catch (err) {
+          console.error('메시지 업데이트 오류:', err);
+        }
+        
+        // 콘텐츠 ID 추출
+        const contentId = statusData.content_id || statusResponse.data.content_id;
+        
+        // 상태에 따른 처리
+        if (statusData.status === 'completed') {
+          // 완료 상태지만 진행률이 100%가 아니면 100%로 설정
+          if (progress < 100) {
+            console.log('완료 상태지만 진행률이 100%가 아님:', progress, '100%로 설정');
+            setGenerationProgress(100);
+            // 1초 대기 후 페이지 이동 처리
+            setTimeout(() => {
+              handleContentCompletion(statusData, newInterval);
+            }, 1000);
+            return;
+          }
+          
+          // 상태가 completed이고 진행률이 이미 100%인 경우 바로 처리
+          const contentResult = handleContentCompletion(statusData, newInterval);
+        } 
+        // 100%이지만 'completed'가 아닌 경우 대비
+        else if (progress === 100 && statusData.status !== 'completed') {
+          console.log('100% 진행률이지만 완료 상태가 아님 - 기다리는 중');          
+          setGenerationMessage('콘텐츠 완성중... 잠시만 기다려주세요.');  
+        }
+        // 진행률이 높지만 100%가 아닌 경우
+        else if (progress >= 95 && progress < 100) {
+          console.log('진행률이 거의 끝나가는 중:', progress, '%');
+          setGenerationMessage(`콘텐츠 생성 거의 완료: ${progress}%. 잠시만 기다려주세요...`);
+        }
+        // 오류 상태 처리
+        else if (statusData.status === 'error' || statusResponse.data.status === 'failed' || statusResponse.data.error) {
+          // 실패한 경우 인터벌 정리 및 에러 표시
+          console.log('오류 상태 감지:', statusData.status, statusResponse.data.status);
+          clearInterval(newInterval);
+          setStatusCheckInterval(null);
+          setGeneratingContent(false);
+          setError(`콘텐츠 생성 실패: ${statusData.message || statusResponse.data.error || '알 수 없는 오류'}`);
+        }
+        // processing 상태는 계속 진행
+
+      } catch (error) {
+        // 오류 상세 정보 로깅
+        console.error('상태 확인 중 오류 발생:', error);
+        if (error.response) {
+          // 서버 응답 오류
+          console.error('서버 응답 오류:', error.response.status, error.response.data);
+        } else if (error.request) {
+          // 요청은 보냈지만 응답이 없음 (CORS 문제 등)
+          console.error('서버 응답 없음:', error.request);
+        } else {
+          // 그 외 오류
+          console.error('오류 메시지:', error.message);
+        }
+        
+        // 사용자에게 메시지 표시
+        setGenerationMessage('상태 확인 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        
+        // 오류 횟수 증가 (상태 변수 사용)
+        const newErrorCount = errorCount + 1;
+        setErrorCount(newErrorCount);
+        console.log(`오류 발생 횟수: ${newErrorCount}/5`);
+        
+        // 여러 번의 오류가 연속되면 폴링 중지
+        if (newErrorCount >= 5) {
+          console.log('오류가 여러 번 발생하여 폴링을 중지합니다.');
+          clearInterval(newInterval);
+          setStatusCheckInterval(null);
+          setGeneratingContent(false);
+          setError('콘텐츠 생성 중 연속 오류 발생 - 페이지를 새로고침해주세요.');
+        }
+      }
+    }, 2000); // 2초마다 상태 확인
+    
+    // 새 인터벌 저장
+    setStatusCheckInterval(newInterval);
   };
   
   // 컴포넌트 언마운트 시 인터벌 정리
@@ -550,7 +726,7 @@ function ContentManagement() {
           <div className="mt-4 bg-yellow-50 p-3 rounded border border-yellow-200">
             <div className="flex items-center">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-500 mr-2"></div>
-              <div>
+              <div className="w-full">
                 {processingStep === 'research' ? (
                   <div>
                     <p className="text-yellow-700">연구 자료를 수집하고 있습니다. 이 작업은 30초 정도 소요될 수 있습니다.</p>
@@ -559,13 +735,29 @@ function ContentManagement() {
                 ) : (
                   <div>
                     <p className="text-yellow-700">
-                      콘텐츠를 생성하고 있습니다. 이 작업은 1-2분 정도 소요될 수 있습니다.
+                      {generationStatus === 'completed' ? generationMessage : `콘텐츠를 생성하고 있습니다: ${generationMessage}`}
                     </p>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2 mb-2">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                        style={{ width: `${generationProgress}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 mb-2">
+                      <span>진행률: {generationProgress}%</span>
+                      <span>{generationStatus === 'completed' ? '완료됨' : '진행 중...'}</span>
+                    </div>
                     <p className="text-sm text-yellow-600">
-                      생성 중에는 페이지를 벗어나지 마세요. 완료되면 자동으로 목록이 새로고침됩니다.
-                    </p>
-                    <p className="text-sm text-yellow-600 mt-1">
-                      만약 오류가 발생하면 자동으로 재시도합니다.
+                      {generationStatus === 'completed' && generationStatus.content_id ? (
+                        <button
+                          onClick={() => navigate(`/content/${generationStatus.content_id}`)}
+                          className="mt-2 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 font-bold"
+                        >
+                          콘텐츠 보기
+                        </button>
+                      ) : (
+                        '생성 중에는 페이지를 벗어나지 마세요. 완료되면 콘텐츠 보기 버튼이 나타납니다.'
+                      )}
                     </p>
                   </div>
                 )}
